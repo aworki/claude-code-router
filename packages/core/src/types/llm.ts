@@ -202,6 +202,13 @@ export interface LLMProvider {
   baseUrl: string;
   apiKey: string;
   models: string[];
+  auth_strategy?: "api-key" | "openai-oauth";
+  account_id?: string;
+  oauth?: {
+    client_id?: string;
+    redirect_uri?: string;
+    scopes?: string[];
+  };
   transformer?: {
     [key: string]: {
       use?: Transformer[];

@@ -3,6 +3,7 @@
   "version": "2.0.0",
   "description": "Use Claude Code without an Anthropics account and route it to another LLM provider",
   "scripts": {
+    "test": "pnpm exec tsx --test $(find packages -type f -name '*.test.ts' | sort)",
     "build": "pnpm build:shared && pnpm build:core && pnpm build:server && pnpm build:cli && pnpm build:ui",
     "build:core": "pnpm --filter @musistudio/llms build",
     "build:shared": "pnpm --filter @CCR/shared build",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@types/node": "^24.0.15",
     "esbuild": "^0.25.1",
+    "tsx": "^4.20.3",
     "shx": "^0.4.0",
     "typescript": "^5.8.2"
   },
