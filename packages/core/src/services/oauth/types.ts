@@ -44,3 +44,32 @@ export interface RefreshTokenResponse {
 }
 
 export type IdTokenValidator = (idToken: string, clientId: string) => Promise<JWTPayload>;
+
+export interface ExchangeAuthorizationCodeInput {
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+}
+
+export interface OAuthAuthorizationRequest {
+  authorizationUrl: string;
+  state: string;
+}
+
+export interface OAuthAuthorizationResult {
+  accountId: string;
+  email?: string;
+  expiresAt: string;
+}
+
+export interface OAuthStatusAccount {
+  accountId: string;
+  email?: string;
+  expiresAt: string;
+  invalid: boolean;
+  reauthRequired: boolean;
+}
+
+export interface OAuthStatusResponse {
+  accounts: OAuthStatusAccount[];
+}

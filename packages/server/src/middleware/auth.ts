@@ -3,9 +3,18 @@ import { FastifyRequest, FastifyReply } from "fastify";
 export const apiKeyAuth =
   (config: any) =>
   async (req: FastifyRequest, reply: FastifyReply, done: () => void) => {
+    const pathname = new URL(req.url, "http://127.0.0.1").pathname;
+
     // Public endpoints that don't require authentication
-    const publicPaths = ["/", "/health"];
-    if (publicPaths.includes(req.url) || req.url.startsWith("/ui")) {
+    const publicPaths = [
+      "/",
+      "/health",
+      "/oauth/login",
+      "/oauth/callback",
+      "/oauth/complete",
+      "/api/oauth/status",
+    ];
+    if (publicPaths.includes(pathname) || pathname.startsWith("/ui")) {
       return done();
     }
 

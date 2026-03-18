@@ -111,3 +111,133 @@ test("buildRequestAuth refreshes expired tokens with the provider client ID", as
     },
   ]);
 });
+
+test("beginAuthorization issues an OpenAI authorize URL and completes with a one-time state", async () => {
+  const exchanged: Array<{ code: string; codeVerifier: string; redirectUri: string }> = [];
+  const service = new OAuthService({
+    vault: {
+      async save() {},
+      async get() {
+        return null;
+      },
+      async list() {
+        return [];
+      },
+      async markInvalid() {
+        return false;
+      },
+    } as any,
+    openAIClientFactory() {
+      return {
+        async refresh() {
+          throw new Error("refresh should not be called");
+        },
+        async exchangeAuthorizationCode(input: {
+          code: string;
+          codeVerifier: string;
+          redirectUri: string;
+        }) {
+          exchanged.push(input);
+          return {
+            accountId: "acct_123",
+            email: "person@example.com",
+            expiresAt: "2026-03-19T00:00:00.000Z",
+          };
+        },
+      };
+    },
+  } as any);
+
+  const started = await service.beginAuthorization({
+    auth_strategy: "openai-oauth",
+    oauth: {
+      client_id: "client-123",
+      redirect_uri: "http://127.0.0.1:3456/oauth/callback",
+      scopes: ["openid", "email", "offline_access"],
+    },
+  } as any);
+
+  const startedUrl = new URL(started.authorizationUrl);
+  const state = startedUrl.searchParams.get("state");
+  assert.ok(state);
+
+  const completed = await service.completeAuthorization({
+    provider: {
+      auth_strategy: "openai-oauth",
+      oauth: {
+        client_id: "client-123",
+        redirect_uri: "http://127.0.0.1:3456/oauth/callback",
+      },
+    } as any,
+    state,
+    code: "auth-code",
+    stateCookieValue: state,
+  });
+
+  assert.deepEqual(completed, {
+    accountId: "acct_123",
+    email: "person@example.com",
+    expiresAt: "2026-03-19T00:00:00.000Z",
+  });
+  assert.equal(exchanged.length, 1);
+  assert.equal(exchanged[0]?.code, "auth-code");
+  assert.equal(exchanged[0]?.redirectUri, "http://127.0.0.1:3456/oauth/callback");
+  assert.ok(exchanged[0]?.codeVerifier);
+
+  await assert.rejects(
+    service.completeAuthorization({
+      provider: {
+        auth_strategy: "openai-oauth",
+        oauth: {
+          client_id: "client-123",
+          redirect_uri: "http://127.0.0.1:3456/oauth/callback",
+        },
+      } as any,
+      state,
+      code: "auth-code",
+      stateCookieValue: state,
+    }),
+    /state/i,
+  );
+});
+
+test("getStatus redacts tokens and reports reauth metadata only", async () => {
+  const service = new OAuthService({
+    vault: {
+      async save() {},
+      async get() {
+        return null;
+      },
+      async list() {
+        return [
+          {
+            accountId: "acct_123",
+            accessToken: "secret-access",
+            refreshToken: "secret-refresh",
+            idToken: "secret-id",
+            email: "person@example.com",
+            expiresAt: "2026-03-19T00:00:00.000Z",
+            invalid: true,
+          },
+        ];
+      },
+      async markInvalid() {
+        return false;
+      },
+    } as any,
+  });
+
+  const status = await service.getStatus();
+
+  assert.deepEqual(status, {
+    accounts: [
+      {
+        accountId: "acct_123",
+        email: "person@example.com",
+        expiresAt: "2026-03-19T00:00:00.000Z",
+        invalid: true,
+        reauthRequired: true,
+      },
+    ],
+  });
+});
