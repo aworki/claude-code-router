@@ -25,6 +25,10 @@ import Fastify, {
   FastifyServerOptions,
 } from "fastify";
 import cors from "@fastify/cors";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { ConfigService, AppConfig } from "./services/config";
 import { errorHandler } from "./api/middleware";
 import { registerApiRoutes } from "./api/routes";
@@ -34,6 +38,7 @@ import { TokenizerService } from "./services/tokenizer";
 import { router, calculateTokenCount, searchProjectBySession } from "./utils/router";
 import { sessionUsageCache } from "./utils/cache";
 import { OAuthService } from "./services/oauth/service";
+import { normalizeOAuthProviderConfig } from "./services/oauth/config";
 import { createTokenVault } from "./services/oauth/token-vault";
 
 // Extend FastifyRequest to include custom properties
@@ -78,21 +83,33 @@ class Server {
   oauthService: OAuthService;
 
   constructor(options: ServerOptions = {}) {
-    const { initialConfig, ...fastifyOptions } = options;
+    const installationSecret = getOrCreateInstallationSecret();
+    const normalizedInitialConfig = normalizeServerInitialConfig(
+      options.initialConfig,
+      installationSecret,
+    );
+    const fastifyOptions = {
+      ...options,
+      initialConfig: normalizedInitialConfig,
+    };
     this.app = createApp({
       ...fastifyOptions,
       logger: fastifyOptions.logger ?? true,
     });
-    this.configService = new ConfigService(options);
+    this.configService = new ConfigService({
+      ...options,
+      initialConfig: normalizedInitialConfig,
+    });
     const oauthVault = createTokenVault({
-      passphrase:
-        this.configService.get("OAUTH_PASSPHRASE") ??
-        process.env.OAUTH_PASSPHRASE ??
-        "claude-code-router",
+      passphrase: this.configService.get("OAUTH_PASSPHRASE", installationSecret),
     });
     this.oauthService = new OAuthService({
       vault: oauthVault,
       logger: this.app.log,
+      defaultRedirectUri: buildDefaultOAuthRedirectUri(
+        this.configService.get("HOST"),
+        this.configService.get("PORT"),
+      ),
     });
     this.transformerService = new TransformerService(
       this.configService,
@@ -275,6 +292,77 @@ class Server {
       process.exit(1);
     }
   }
+}
+
+const INSTALLATION_SECRET_PATH = join(
+  homedir(),
+  ".claude-code-router",
+  "oauth",
+  "installation-secret",
+);
+
+function getOrCreateInstallationSecret() {
+  if (existsSync(INSTALLATION_SECRET_PATH)) {
+    const secret = readFileSync(INSTALLATION_SECRET_PATH, "utf8").trim();
+    if (secret) {
+      return secret;
+    }
+  }
+
+  mkdirSync(dirname(INSTALLATION_SECRET_PATH), { recursive: true });
+  const secret = randomBytes(32).toString("hex");
+  writeFileSync(INSTALLATION_SECRET_PATH, `${secret}\n`, { mode: 0o600 });
+  return secret;
+}
+
+function normalizeServerInitialConfig(initialConfig: AppConfig | undefined, installationSecret: string) {
+  if (!initialConfig) {
+    return {
+      OAUTH_PASSPHRASE: installationSecret,
+      OAUTH_COOKIE_SECRET: installationSecret,
+    };
+  }
+
+  const defaultRedirectUri = buildDefaultOAuthRedirectUri(initialConfig.HOST, initialConfig.PORT);
+  const normalizeProviderList = (providers: any[] | undefined) =>
+    providers?.map((provider) =>
+      normalizeOAuthProviderConfig(provider, {
+        defaultRedirectUri,
+      }),
+    );
+
+  return {
+    ...initialConfig,
+    providers: normalizeProviderList(initialConfig.providers) ?? initialConfig.providers,
+    Providers: normalizeProviderList(initialConfig.Providers) ?? initialConfig.Providers,
+    OAUTH_PASSPHRASE:
+      initialConfig.OAUTH_PASSPHRASE ??
+      process.env.OAUTH_PASSPHRASE ??
+      installationSecret,
+    OAUTH_COOKIE_SECRET:
+      initialConfig.OAUTH_COOKIE_SECRET ??
+      process.env.OAUTH_COOKIE_SECRET ??
+      installationSecret,
+  };
+}
+
+function buildDefaultOAuthRedirectUri(host: string | undefined, port: string | number | undefined) {
+  const normalizedPort = port ?? 3456;
+  const normalizedHost = normalizeOAuthRedirectHost(host);
+  return `http://${normalizedHost}:${normalizedPort}/oauth/callback`;
+}
+
+function normalizeOAuthRedirectHost(host: string | undefined) {
+  const normalizedHost = host?.trim().toLowerCase();
+  if (!normalizedHost || normalizedHost === "0.0.0.0" || normalizedHost === "::" || normalizedHost === "[::]") {
+    return "localhost";
+  }
+
+  if (normalizedHost === "127.0.0.1" || normalizedHost === "localhost" || normalizedHost === "::1" || normalizedHost === "[::1]") {
+    return normalizedHost;
+  }
+
+  return "localhost";
 }
 
 // Export for external use

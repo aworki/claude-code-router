@@ -201,6 +201,38 @@ test("beginAuthorization issues an OpenAI authorize URL and completes with a one
   );
 });
 
+test("beginAuthorization uses the runtime default redirect URI when the provider does not override it", async () => {
+  const service = new OAuthService({
+    vault: {
+      async save() {},
+      async get() {
+        return null;
+      },
+      async list() {
+        return [];
+      },
+      async markInvalid() {
+        return false;
+      },
+    } as any,
+    defaultRedirectUri: "http://localhost:4567/oauth/callback",
+    stateFactory: () => "state-1",
+  } as any);
+
+  const started = await service.beginAuthorization({
+    auth_strategy: "openai-oauth",
+    oauth: {
+      client_id: "client-123",
+    },
+  } as any);
+
+  const authorizeUrl = new URL(started.authorizationUrl);
+  assert.equal(
+    authorizeUrl.searchParams.get("redirect_uri"),
+    "http://localhost:4567/oauth/callback",
+  );
+});
+
 test("getStatus redacts tokens and reports reauth metadata only", async () => {
   const service = new OAuthService({
     vault: {
@@ -232,8 +264,9 @@ test("getStatus redacts tokens and reports reauth metadata only", async () => {
   assert.deepEqual(status, {
     accounts: [
       {
-        accountId: "acct_123",
-        email: "person@example.com",
+        accountKey: "182d1cfdc619",
+        accountHint: "ac...23",
+        emailHint: "p...n@e...e.com",
         expiresAt: "2026-03-19T00:00:00.000Z",
         invalid: true,
         reauthRequired: true,

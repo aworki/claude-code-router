@@ -5,11 +5,16 @@ import { OAuthService } from "../../../core/src/services/oauth/service";
 import { apiKeyAuth } from "../middleware/auth";
 import { registerOAuthRoutes } from "./routes";
 
-function createTestApp() {
+function createTestApp(options?: {
+  routeConfig?: any;
+  authConfig?: any;
+  vaultList?: Array<Record<string, unknown>>;
+}) {
   const app = Fastify();
-  const config = {
+  const authConfig = options?.authConfig ?? {
     APIKEY: "test-api-key",
     PORT: 3456,
+    OAUTH_COOKIE_SECRET: "signed-cookie-secret",
     providers: [
       {
         name: "openai-oauth",
@@ -22,6 +27,8 @@ function createTestApp() {
       },
     ],
   };
+  const routeConfig = options?.routeConfig ?? authConfig;
+  const effectivePort = routeConfig?.initialConfig?.PORT ?? routeConfig?.PORT ?? 3456;
 
   const oauthService = new OAuthService({
     vault: {
@@ -30,17 +37,22 @@ function createTestApp() {
         return null;
       },
       async list() {
-        return [];
+        return options?.vaultList ?? [];
       },
       async markInvalid() {
         return false;
       },
     } as any,
+    defaultRedirectUri: `http://localhost:${effectivePort}/oauth/callback`,
+    stateFactory: (() => {
+      let counter = 0;
+      return () => `state-${++counter}`;
+    })(),
   });
 
   app.addHook("preHandler", async (req, reply) => {
     return new Promise<void>((resolve, reject) => {
-      apiKeyAuth(config)(req as any, reply as any, (error?: Error) => {
+      apiKeyAuth(authConfig)(req as any, reply as any, (error?: Error) => {
         if (error) {
           reject(error);
           return;
@@ -51,7 +63,7 @@ function createTestApp() {
   });
 
   app.register(registerOAuthRoutes, {
-    config,
+    config: routeConfig,
     oauthService,
   });
 
@@ -94,6 +106,50 @@ test("GET /oauth/login redirects to the OpenAI authorize URL and sets signed sta
   }
 });
 
+test("GET /oauth/login resolves providers from the real startup initialConfig shape and uses the actual server port by default", async () => {
+  const app = createTestApp({
+    authConfig: {
+      APIKEY: "test-api-key",
+      PORT: 4567,
+      providers: [],
+    },
+    routeConfig: {
+      initialConfig: {
+        PORT: 4567,
+        OAUTH_COOKIE_SECRET: "signed-cookie-secret",
+        providers: [
+          {
+            name: "openai-oauth",
+            auth_strategy: "openai-oauth",
+            oauth: {
+              client_id: "client-123",
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/oauth/login",
+    });
+
+    assert.equal(response.statusCode, 302);
+    const location = response.headers.location;
+    assert.ok(location);
+
+    const authorizeUrl = new URL(location);
+    assert.equal(
+      authorizeUrl.searchParams.get("redirect_uri"),
+      "http://localhost:4567/oauth/callback",
+    );
+  } finally {
+    await app.close();
+  }
+});
+
 test("POST /oauth/complete rejects a callback URL whose redirect does not match the issued session", async () => {
   const app = createTestApp();
 
@@ -129,6 +185,47 @@ test("POST /oauth/complete rejects a callback URL whose redirect does not match 
 
     assert.equal(response.statusCode, 400);
     assert.match(response.body, /redirect/i);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/oauth/status returns only redacted account metadata", async () => {
+  const app = createTestApp({
+    vaultList: [
+      {
+        accountId: "acct_123456789",
+        accessToken: "secret-access",
+        refreshToken: "secret-refresh",
+        email: "person@example.com",
+        expiresAt: "2026-03-19T00:00:00.000Z",
+        invalid: false,
+      },
+    ],
+  });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/oauth/status",
+    });
+
+    assert.equal(response.statusCode, 200);
+    const payload = response.json();
+    assert.deepEqual(payload, {
+      accounts: [
+        {
+          accountKey: "e77b122d95cf",
+          accountHint: "ac...89",
+          emailHint: "p...n@e...e.com",
+          expiresAt: "2026-03-19T00:00:00.000Z",
+          invalid: false,
+          reauthRequired: false,
+        },
+      ],
+    });
+    assert.equal(JSON.stringify(payload).includes("acct_123456789"), false);
+    assert.equal(JSON.stringify(payload).includes("person@example.com"), false);
   } finally {
     await app.close();
   }

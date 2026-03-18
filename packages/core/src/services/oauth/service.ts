@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { LLMProvider } from "@/types/llm";
 import { OpenAIOAuthClient } from "./openai-client";
 import { normalizeOAuthProviderConfig } from "./config";
@@ -32,6 +33,7 @@ interface OAuthServiceDependencies {
   stateFactory?: () => string;
   authorizeEndpoint?: string;
   redirectAllowlist?: readonly string[];
+  defaultRedirectUri?: string;
 }
 
 export class OAuthService {
@@ -44,6 +46,7 @@ export class OAuthService {
   private readonly stateFactory: () => string;
   private readonly authorizeEndpoint: string;
   private readonly redirectAllowlist: readonly string[];
+  private readonly defaultRedirectUri?: string;
 
   constructor(private readonly deps: OAuthServiceDependencies) {
     this.now = deps.now ?? Date.now;
@@ -51,6 +54,7 @@ export class OAuthService {
     this.stateFactory = deps.stateFactory ?? (() => randomBytes(32).toString("base64url"));
     this.authorizeEndpoint = deps.authorizeEndpoint ?? "https://auth0.openai.com/authorize";
     this.redirectAllowlist = deps.redirectAllowlist ?? [];
+    this.defaultRedirectUri = deps.defaultRedirectUri;
   }
 
   async buildRequestAuth(provider: Partial<LLMProvider>): Promise<OAuthRequestAuth> {
@@ -168,8 +172,9 @@ export class OAuthService {
     const bundles = await this.deps.vault.list();
     return {
       accounts: bundles.map((bundle) => ({
-        accountId: bundle.accountId,
-        email: bundle.email,
+        accountKey: createHash("sha256").update(bundle.accountId).digest("hex").slice(0, 12),
+        accountHint: redactAccountId(bundle.accountId),
+        emailHint: redactEmail(bundle.email),
         expiresAt: bundle.expiresAt,
         invalid: Boolean(bundle.invalid),
         reauthRequired: Boolean(bundle.invalid) || this.isExpired(bundle.expiresAt),
@@ -226,7 +231,9 @@ export class OAuthService {
   }
 
   private requireOAuthProvider(provider: Partial<LLMProvider>) {
-    const normalizedProvider = normalizeOAuthProviderConfig(provider as any) as Partial<LLMProvider>;
+    const normalizedProvider = normalizeOAuthProviderConfig(provider as any, {
+      defaultRedirectUri: this.defaultRedirectUri,
+    }) as Partial<LLMProvider>;
     if (normalizedProvider.auth_strategy !== "openai-oauth" || !normalizedProvider.oauth?.client_id || !normalizedProvider.oauth.redirect_uri) {
       throw new Error("OpenAI OAuth provider is not configured");
     }
@@ -263,4 +270,37 @@ export class OAuthService {
     this.openAIClients.set(clientId, client);
     return client;
   }
+}
+
+function redactAccountId(accountId: string) {
+  if (accountId.length <= 4) {
+    return `${accountId[0] ?? ""}...${accountId.at(-1) ?? ""}`;
+  }
+
+  return `${accountId.slice(0, 2)}...${accountId.slice(-2)}`;
+}
+
+function redactEmail(email?: string) {
+  if (!email) {
+    return undefined;
+  }
+
+  const [localPart, domain = ""] = email.split("@");
+  const domainParts = domain.split(".");
+  const baseDomain = domainParts[0] ?? "";
+  const topLevelDomain = domainParts.slice(1).join(".");
+
+  return `${redactSegment(localPart)}@${redactSegment(baseDomain)}${topLevelDomain ? `.${topLevelDomain}` : ""}`;
+}
+
+function redactSegment(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  if (value.length === 1) {
+    return `${value}...`;
+  }
+
+  return `${value[0]}...${value.at(-1)}`;
 }

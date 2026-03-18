@@ -37,12 +37,17 @@ interface OAuthRoutesOptions {
 }
 
 export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async (app, options) => {
+  const resolvedConfig = getOAuthConfigRoot(options.config);
+  const cookieSecret =
+    options.cookieSecret ??
+    resolvedConfig.OAUTH_COOKIE_SECRET;
+
+  if (!cookieSecret) {
+    throw new Error("OAUTH_COOKIE_SECRET must be configured before registering OAuth routes");
+  }
+
   await app.register(cookie, {
-    secret:
-      options.cookieSecret ??
-      options.config.OAUTH_COOKIE_SECRET ??
-      options.config.OAUTH_PASSPHRASE ??
-      "claude-code-router",
+    secret: cookieSecret,
   });
 
   app.get("/oauth/login", async (_req, reply) => {
@@ -121,13 +126,18 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
 };
 
 function getConfiguredOAuthProvider(config: any): OAuthProviderConfig {
-  const providers = config.Providers || config.providers || [];
+  const resolvedConfig = getOAuthConfigRoot(config);
+  const providers = resolvedConfig.Providers || resolvedConfig.providers || [];
   const provider = providers.find((candidate: OAuthProviderConfig) => candidate.auth_strategy === "openai-oauth");
   if (!provider) {
     throw new Error("OpenAI OAuth provider is not configured");
   }
 
   return provider;
+}
+
+function getOAuthConfigRoot(config: any) {
+  return config?.initialConfig ?? config;
 }
 
 function readSignedStateCookie(

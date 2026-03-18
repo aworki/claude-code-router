@@ -63,8 +63,9 @@ export interface OAuthAuthorizationResult {
 }
 
 export interface OAuthStatusAccount {
-  accountId: string;
-  email?: string;
+  accountKey: string;
+  accountHint: string;
+  emailHint?: string;
   expiresAt: string;
   invalid: boolean;
   reauthRequired: boolean;
