@@ -161,10 +161,3 @@ declare module "@musistudio/llms" {
     allSpeeds: number[];
   };
 }
-
-declare module "fastify" {
-  interface FastifyRequest {
-    pathname?: string;
-    preset?: string;
-  }
-}
