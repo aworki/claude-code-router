@@ -35,8 +35,6 @@ import { router, calculateTokenCount, searchProjectBySession } from "./utils/rou
 import { sessionUsageCache } from "./utils/cache";
 import { OAuthService } from "./services/oauth/service";
 import { createTokenVault } from "./services/oauth/token-vault";
-import { OpenAIOAuthClient } from "./services/oauth/openai-client";
-import { normalizeOAuthProviderConfig } from "./services/oauth/config";
 
 // Extend FastifyRequest to include custom properties
 declare module "fastify" {
@@ -86,22 +84,14 @@ class Server {
       logger: fastifyOptions.logger ?? true,
     });
     this.configService = new ConfigService(options);
-    const defaultOAuthProvider = normalizeOAuthProviderConfig({
-      auth_strategy: "openai-oauth",
-    });
     const oauthVault = createTokenVault({
       passphrase:
         this.configService.get("OAUTH_PASSPHRASE") ??
         process.env.OAUTH_PASSPHRASE ??
         "claude-code-router",
     });
-    const openAIClient = new OpenAIOAuthClient({
-      clientId: defaultOAuthProvider.oauth?.client_id ?? "",
-      vault: oauthVault,
-    });
     this.oauthService = new OAuthService({
       vault: oauthVault,
-      openAIClient,
       logger: this.app.log,
     });
     this.transformerService = new TransformerService(

@@ -1,5 +1,6 @@
 import type { LLMProvider } from "@/types/llm";
-import type { OpenAIOAuthClient } from "./openai-client";
+import { OpenAIOAuthClient } from "./openai-client";
+import { normalizeOAuthProviderConfig } from "./config";
 import type { StoredTokenBundle, TokenVault } from "./types";
 
 interface OAuthRequestAuth {
@@ -10,7 +11,7 @@ interface OAuthServiceDependencies {
   vault: TokenVault & {
     getValidAccessToken?: (accountId: string) => Promise<StoredTokenBundle | { accessToken: string } | null>;
   };
-  openAIClient?: Pick<OpenAIOAuthClient, "refresh">;
+  openAIClientFactory?: (clientId: string) => Pick<OpenAIOAuthClient, "refresh">;
   logger?: {
     warn?: (...args: any[]) => void;
   };
@@ -19,25 +20,28 @@ interface OAuthServiceDependencies {
 
 export class OAuthService {
   private readonly now: () => number;
+  private readonly openAIClients = new Map<string, Pick<OpenAIOAuthClient, "refresh">>();
 
   constructor(private readonly deps: OAuthServiceDependencies) {
     this.now = deps.now ?? Date.now;
   }
 
   async buildRequestAuth(provider: Partial<LLMProvider>): Promise<OAuthRequestAuth> {
-    if (provider.auth_strategy !== "openai-oauth") {
+    const normalizedProvider = normalizeOAuthProviderConfig(provider as any) as Partial<LLMProvider>;
+
+    if (normalizedProvider.auth_strategy !== "openai-oauth") {
       return {
-        headers: provider.apiKey
-          ? { Authorization: `Bearer ${provider.apiKey}` }
+        headers: normalizedProvider.apiKey
+          ? { Authorization: `Bearer ${normalizedProvider.apiKey}` }
           : {},
       };
     }
 
-    if (!provider.account_id) {
+    if (!normalizedProvider.account_id) {
       throw this.createReauthRequiredError();
     }
 
-    const token = await this.getValidAccessToken(provider.account_id);
+    const token = await this.getValidAccessToken(normalizedProvider as Partial<LLMProvider> & { account_id: string });
     if (!token?.accessToken) {
       throw this.createReauthRequiredError();
     }
@@ -49,7 +53,11 @@ export class OAuthService {
     };
   }
 
-  private async getValidAccessToken(accountId: string) {
+  private async getValidAccessToken(
+    provider: Partial<LLMProvider> & { account_id: string }
+  ) {
+    const accountId = provider.account_id;
+
     if (typeof this.deps.vault.getValidAccessToken === "function") {
       return this.deps.vault.getValidAccessToken(accountId);
     }
@@ -63,12 +71,12 @@ export class OAuthService {
       return token;
     }
 
-    if (!this.deps.openAIClient || !token.refreshToken) {
+    if (!token.refreshToken) {
       return null;
     }
 
     try {
-      return await this.deps.openAIClient.refresh({
+      return await this.getOpenAIClient(provider.oauth?.client_id).refresh({
         accountId,
         refreshToken: token.refreshToken,
       });
@@ -91,5 +99,22 @@ export class OAuthService {
     const error = new Error("reauth_required");
     (error as Error & { code?: string }).code = "reauth_required";
     return error;
+  }
+
+  private getOpenAIClient(clientId: string) {
+    const cachedClient = this.openAIClients.get(clientId);
+    if (cachedClient) {
+      return cachedClient;
+    }
+
+    const client =
+      this.deps.openAIClientFactory?.(clientId) ??
+      new OpenAIOAuthClient({
+        clientId,
+        vault: this.deps.vault,
+      });
+
+    this.openAIClients.set(clientId, client);
+    return client;
   }
 }

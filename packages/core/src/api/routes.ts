@@ -537,7 +537,7 @@ export const registerApiRoutes = async (
       reply: FastifyReply
     ) => {
       // Validation
-      const { name, baseUrl, apiKey, models, auth_strategy, account_id } = request.body;
+      const { name, baseUrl, apiKey, models, auth_strategy } = request.body;
 
       if (!name?.trim()) {
         throw createApiError(
@@ -557,10 +557,6 @@ export const registerApiRoutes = async (
 
       if (auth_strategy !== "openai-oauth" && !apiKey?.trim()) {
         throw createApiError("API key is required", 400, "invalid_request");
-      }
-
-      if (auth_strategy === "openai-oauth" && !account_id?.trim()) {
-        throw createApiError("Account ID is required", 400, "invalid_request");
       }
 
       if (!models || !Array.isArray(models) || models.length === 0) {
