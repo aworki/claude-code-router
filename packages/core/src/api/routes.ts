@@ -656,6 +656,12 @@ export const registerApiRoutes = async (
         ...existingProvider,
         ...request.body,
       };
+      const updates = { ...request.body };
+
+      if (effectiveProvider.auth_strategy === "openai-oauth") {
+        effectiveProvider.apiKey = undefined;
+        updates.apiKey = undefined;
+      }
 
       if (
         effectiveProvider.auth_strategy !== "openai-oauth" &&
@@ -666,7 +672,7 @@ export const registerApiRoutes = async (
 
       const provider = fastify.providerService.updateProvider(
         request.params.id,
-        request.body
+        updates
       );
       if (!provider) {
         throw createApiError("Provider not found", 404, "provider_not_found");
