@@ -8,6 +8,7 @@ import {
   extractOAuthStateCookie,
   formatOAuthAccounts,
   getOAuthLoginUrl,
+  getOAuthLoginGuidance,
   loadOAuthLoginCookie,
   postOAuthComplete,
   storeOAuthLoginCookie,
@@ -38,6 +39,13 @@ test("oauth login path targets the local server route", () => {
     getOAuthLoginUrl("http://127.0.0.1:3456"),
     "http://127.0.0.1:3456/oauth/login",
   );
+});
+
+test("oauth login guidance tells the user to complete manually", () => {
+  const guidance = getOAuthLoginGuidance();
+
+  assert.match(guidance, /copy the callback URL/i);
+  assert.match(guidance, /ccr oauth complete/i);
 });
 
 test("captures and persists the signed oauth login cookie", async () => {

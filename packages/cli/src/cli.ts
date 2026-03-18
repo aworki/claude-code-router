@@ -6,6 +6,7 @@ import {
   captureOAuthLoginSession,
   fetchOAuthStatus,
   formatOAuthAccounts,
+  getOAuthLoginGuidance,
   openExternalUrl,
   postOAuthComplete,
 } from "./utils/oauth";
@@ -141,6 +142,7 @@ async function handleOAuthCommand(args: string[]) {
       const serviceInfo = await getServiceInfo();
       const authorizationUrl = await captureOAuthLoginSession(serviceInfo.endpoint);
       await openExternalUrl(authorizationUrl);
+      console.log(getOAuthLoginGuidance());
       break;
     }
     case "complete": {

@@ -161,6 +161,13 @@ export function formatOAuthAccounts(accounts: OAuthAccountStatus[]) {
   return lines.join("\n");
 }
 
+export function getOAuthLoginGuidance() {
+  return [
+    "Authorize in your browser, then copy the callback URL from the address bar.",
+    'Finish the flow with: `ccr oauth complete "<callback-url>"`',
+  ].join("\n");
+}
+
 export function openExternalUrl(url: string) {
   const escapedUrl = url.replace(/"/g, '\\"');
   let command = "";
