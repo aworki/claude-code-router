@@ -1,4 +1,4 @@
-import type { Config, Provider, Transformer } from '@/types';
+import type { Config, OAuthStatusResponse, Provider, Transformer } from '@/types';
 
 // 日志聚合响应类型
 interface GroupedLogsResponse {
@@ -49,6 +49,11 @@ class ApiClient {
   // Update temp API key
   setTempApiKey(tempApiKey: string | null) {
     this.tempApiKey = tempApiKey;
+  }
+
+  // Start OAuth login in the browser
+  startOAuthLogin(providerName: string) {
+    window.location.href = `/oauth/login?provider=${encodeURIComponent(providerName)}`;
   }
 
   // Create headers with API key authentication
@@ -185,6 +190,11 @@ class ApiClient {
   // Delete a provider
   async deleteProvider(index: number): Promise<void> {
     return this.delete<void>(`/api/providers/${index}`);
+  }
+
+  // Get OAuth status
+  async getOAuthStatus(): Promise<OAuthStatusResponse> {
+    return this.get<OAuthStatusResponse>('/oauth/status');
   }
 
   // Get transformers

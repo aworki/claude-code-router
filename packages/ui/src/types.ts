@@ -3,6 +3,25 @@ export interface ProviderTransformer {
   [key: string]: any; // Allow for model-specific transformers
 }
 
+export interface OAuthProviderConfig {
+  client_id?: string;
+  redirect_uri?: string;
+  scopes?: string[];
+}
+
+export interface OAuthAccountStatus {
+  accountKey: string;
+  accountHint: string;
+  emailHint?: string;
+  expiresAt: string;
+  invalid: boolean;
+  reauthRequired: boolean;
+}
+
+export interface OAuthStatusResponse {
+  accounts: OAuthAccountStatus[];
+}
+
 export interface Provider {
   name: string;
   api_base_url: string;
@@ -10,11 +29,7 @@ export interface Provider {
   models: string[];
   auth_strategy?: "api-key" | "openai-oauth";
   account_id?: string;
-  oauth?: {
-    client_id?: string;
-    redirect_uri?: string;
-    scopes?: string[];
-  };
+  oauth?: OAuthProviderConfig;
   transformer?: ProviderTransformer;
 }
 
