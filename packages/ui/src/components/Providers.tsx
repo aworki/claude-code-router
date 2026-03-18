@@ -137,6 +137,10 @@ export function Providers() {
   const handleSaveProvider = () => {
     if (!editingProviderData) return;
     const authStrategy = editingProviderData.auth_strategy ?? "api-key";
+    const persistedProvider =
+      authStrategy === "openai-oauth"
+        ? { ...editingProviderData, api_key: "" }
+        : editingProviderData;
     
     // Validate name
     if (!editingProviderData.name || editingProviderData.name.trim() === '') {
@@ -172,9 +176,9 @@ export function Providers() {
     if (editingProviderIndex !== null && editingProviderData) {
       const newProviders = [...config.Providers];
       if (isNewProvider) {
-        newProviders.push(editingProviderData);
+        newProviders.push(persistedProvider);
       } else {
-        newProviders[editingProviderIndex] = editingProviderData;
+        newProviders[editingProviderIndex] = persistedProvider;
       }
       setConfig({ ...config, Providers: newProviders });
     }
