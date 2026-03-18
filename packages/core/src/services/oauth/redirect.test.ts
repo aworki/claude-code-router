@@ -13,6 +13,10 @@ test("accepts a valid loopback redirect", () => {
   assert.doesNotThrow(() => assertAllowedLoopbackRedirect("http://localhost:1455/oauth/callback"));
 });
 
+test("accepts bracketed IPv6 loopback redirect", () => {
+  assert.doesNotThrow(() => assertAllowedLoopbackRedirect("http://[::1]:1455/oauth/callback"));
+});
+
 test("rejects invalid redirect scheme", () => {
   assert.throws(
     () => assertAllowedLoopbackRedirect("file:///oauth/callback"),
