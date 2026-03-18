@@ -8,6 +8,7 @@ import {
 } from "../types/llm";
 import { ConfigService } from "./config"; 
 import { TransformerService } from "./transformer";
+import { normalizeOAuthProviderConfig } from "./oauth/config";
 
 export class ProviderService {
   private providers: Map<string, LLMProvider> = new Map();
@@ -29,21 +30,27 @@ export class ProviderService {
   private initializeFromProvidersArray(providersConfig: ConfigProvider[]) {
     providersConfig.forEach((providerConfig: ConfigProvider) => {
       try {
+        const normalizedProviderConfig = normalizeOAuthProviderConfig(
+          providerConfig
+        ) as ConfigProvider;
+        const requiresApiKey =
+          normalizedProviderConfig.auth_strategy !== "openai-oauth";
+
         if (
-          !providerConfig.name ||
-          !providerConfig.api_base_url ||
-          !providerConfig.api_key
+          !normalizedProviderConfig.name ||
+          !normalizedProviderConfig.api_base_url ||
+          (requiresApiKey && !normalizedProviderConfig.api_key)
         ) {
           return;
         }
 
         const transformer: LLMProvider["transformer"] = {}
 
-        if (providerConfig.transformer) {
-          Object.keys(providerConfig.transformer).forEach(key => {
+        if (normalizedProviderConfig.transformer) {
+          Object.keys(normalizedProviderConfig.transformer).forEach(key => {
             if (key === 'use') {
-              if (Array.isArray(providerConfig.transformer.use)) {
-                transformer.use = providerConfig.transformer.use.map((transformer) => {
+              if (Array.isArray(normalizedProviderConfig.transformer.use)) {
+                transformer.use = normalizedProviderConfig.transformer.use.map((transformer) => {
                   if (Array.isArray(transformer) && typeof transformer[0] === 'string') {
                     const Constructor = this.transformerService.getTransformer(transformer[0]);
                     if (Constructor) {
@@ -60,9 +67,9 @@ export class ProviderService {
                 }).filter((transformer) => typeof transformer !== 'undefined');
               }
             } else {
-              if (Array.isArray(providerConfig.transformer[key]?.use)) {
+              if (Array.isArray(normalizedProviderConfig.transformer[key]?.use)) {
                 transformer[key] = {
-                  use: providerConfig.transformer[key].use.map((transformer) => {
+                  use: normalizedProviderConfig.transformer[key].use.map((transformer) => {
                     if (Array.isArray(transformer) && typeof transformer[0] === 'string') {
                       const Constructor = this.transformerService.getTransformer(transformer[0]);
                       if (Constructor) {
@@ -84,14 +91,17 @@ export class ProviderService {
         }
 
         this.registerProvider({
-          name: providerConfig.name,
-          baseUrl: providerConfig.api_base_url,
-          apiKey: providerConfig.api_key,
-          models: providerConfig.models || [],
-          transformer: providerConfig.transformer ? transformer : undefined,
+          name: normalizedProviderConfig.name,
+          baseUrl: normalizedProviderConfig.api_base_url,
+          apiKey: normalizedProviderConfig.api_key,
+          models: normalizedProviderConfig.models || [],
+          auth_strategy: normalizedProviderConfig.auth_strategy,
+          account_id: normalizedProviderConfig.account_id,
+          oauth: normalizedProviderConfig.oauth,
+          transformer: normalizedProviderConfig.transformer ? transformer : undefined,
         });
 
-        this.logger.info(`${providerConfig.name} provider registered`);
+        this.logger.info(`${normalizedProviderConfig.name} provider registered`);
       } catch (error) {
         this.logger.error(`${providerConfig.name} provider registered error: ${error}`);
       }

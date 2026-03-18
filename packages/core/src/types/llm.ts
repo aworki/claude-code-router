@@ -13,6 +13,14 @@ import type { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/messages
 import { Transformer } from "./transformer";
 import type { ProviderTokenizerConfig } from "./tokenizer";
 
+export type ProviderAuthStrategy = "api-key" | "openai-oauth";
+
+export interface ProviderOAuthConfig {
+  client_id?: string;
+  redirect_uri?: string;
+  scopes?: string[];
+}
+
 export interface UrlCitation {
   url: string;
   title: string;
@@ -200,15 +208,11 @@ export interface ConversionOptions {
 export interface LLMProvider {
   name: string;
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
   models: string[];
-  auth_strategy?: "api-key" | "openai-oauth";
+  auth_strategy?: ProviderAuthStrategy;
   account_id?: string;
-  oauth?: {
-    client_id?: string;
-    redirect_uri?: string;
-    scopes?: string[];
-  };
+  oauth?: ProviderOAuthConfig;
   transformer?: {
     [key: string]: {
       use?: Transformer[];
@@ -235,15 +239,11 @@ export interface RequestRouteInfo {
 export interface ConfigProvider {
   name: string;
   api_base_url: string;
-  api_key: string;
+  api_key?: string;
   models: string[];
-  auth_strategy?: "api-key" | "openai-oauth";
+  auth_strategy?: ProviderAuthStrategy;
   account_id?: string;
-  oauth?: {
-    client_id?: string;
-    redirect_uri?: string;
-    scopes?: string[];
-  };
+  oauth?: ProviderOAuthConfig;
   transformer: {
     use?: string[] | Array<any>[];
   } & {

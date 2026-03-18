@@ -33,6 +33,10 @@ import { TransformerService } from "./services/transformer";
 import { TokenizerService } from "./services/tokenizer";
 import { router, calculateTokenCount, searchProjectBySession } from "./utils/router";
 import { sessionUsageCache } from "./utils/cache";
+import { OAuthService } from "./services/oauth/service";
+import { createTokenVault } from "./services/oauth/token-vault";
+import { OpenAIOAuthClient } from "./services/oauth/openai-client";
+import { normalizeOAuthProviderConfig } from "./services/oauth/config";
 
 // Extend FastifyRequest to include custom properties
 declare module "fastify" {
@@ -43,6 +47,7 @@ declare module "fastify" {
   }
   interface FastifyInstance {
     _server?: Server;
+    oauthService: OAuthService;
   }
 }
 
@@ -72,6 +77,7 @@ class Server {
   providerService!: ProviderService;
   transformerService: TransformerService;
   tokenizerService: TokenizerService;
+  oauthService: OAuthService;
 
   constructor(options: ServerOptions = {}) {
     const { initialConfig, ...fastifyOptions } = options;
@@ -80,6 +86,24 @@ class Server {
       logger: fastifyOptions.logger ?? true,
     });
     this.configService = new ConfigService(options);
+    const defaultOAuthProvider = normalizeOAuthProviderConfig({
+      auth_strategy: "openai-oauth",
+    });
+    const oauthVault = createTokenVault({
+      passphrase:
+        this.configService.get("OAUTH_PASSPHRASE") ??
+        process.env.OAUTH_PASSPHRASE ??
+        "claude-code-router",
+    });
+    const openAIClient = new OpenAIOAuthClient({
+      clientId: defaultOAuthProvider.oauth?.client_id ?? "",
+      vault: oauthVault,
+    });
+    this.oauthService = new OAuthService({
+      vault: oauthVault,
+      openAIClient,
+      logger: this.app.log,
+    });
     this.transformerService = new TransformerService(
       this.configService,
       this.app.log
@@ -140,6 +164,7 @@ class Server {
         fastify.decorate('transformerService', this.transformerService);
         fastify.decorate('providerService', this.providerService);
         fastify.decorate('tokenizerService', this.tokenizerService);
+        fastify.decorate('oauthService', this.oauthService);
         // Add router hook for main namespace
         fastify.addHook('preHandler', async (req: any, reply: any) => {
           const url = new URL(`http://127.0.0.1${req.url}`);
@@ -181,6 +206,7 @@ class Server {
       fastify.decorate('transformerService', transformerService);
       fastify.decorate('providerService', providerService);
       fastify.decorate('tokenizerService', tokenizerService);
+      fastify.decorate('oauthService', this.oauthService);
       // Add router hook for namespace
       fastify.addHook('preHandler', async (req: any, reply: any) => {
         const url = new URL(`http://127.0.0.1${req.url}`);

@@ -12,6 +12,7 @@ import { ConfigService } from "@/services/config";
 import { ProviderService } from "@/services/provider";
 import { TransformerService } from "@/services/transformer";
 import { Transformer } from "@/types/transformer";
+import { OAuthService } from "@/services/oauth/service";
 
 // Extend FastifyInstance to include custom services
 declare module "fastify" {
@@ -19,6 +20,7 @@ declare module "fastify" {
     configService: ConfigService;
     providerService: ProviderService;
     transformerService: TransformerService;
+    oauthService: OAuthService;
   }
 
   interface FastifyRequest {
@@ -332,10 +334,24 @@ async function sendRequestToProvider(
     }
   }
 
+  let providerAuth;
+  try {
+    providerAuth = await fastify.oauthService.buildRequestAuth(provider);
+  } catch (error: any) {
+    if (error?.code === "reauth_required") {
+      throw createApiError(
+        `OAuth reauthorization required for provider '${provider.name}'`,
+        401,
+        "reauth_required"
+      );
+    }
+    throw error;
+  }
+
   // Send HTTP request
   // Prepare headers
   const requestHeaders: Record<string, string> = {
-    Authorization: `Bearer ${provider.apiKey}`,
+    ...(providerAuth?.headers || {}),
     ...(config?.headers || {}),
   };
 
@@ -500,9 +516,19 @@ export const registerApiRoutes = async (
             type: { type: "string", enum: ["openai", "anthropic"] },
             baseUrl: { type: "string" },
             apiKey: { type: "string" },
+            auth_strategy: { type: "string", enum: ["api-key", "openai-oauth"] },
+            account_id: { type: "string" },
+            oauth: {
+              type: "object",
+              properties: {
+                client_id: { type: "string" },
+                redirect_uri: { type: "string" },
+                scopes: { type: "array", items: { type: "string" } },
+              },
+            },
             models: { type: "array", items: { type: "string" } },
           },
-          required: ["id", "name", "type", "baseUrl", "apiKey", "models"],
+          required: ["id", "name", "type", "baseUrl", "models"],
         },
       },
     },
@@ -511,7 +537,7 @@ export const registerApiRoutes = async (
       reply: FastifyReply
     ) => {
       // Validation
-      const { name, baseUrl, apiKey, models } = request.body;
+      const { name, baseUrl, apiKey, models, auth_strategy, account_id } = request.body;
 
       if (!name?.trim()) {
         throw createApiError(
@@ -529,8 +555,12 @@ export const registerApiRoutes = async (
         );
       }
 
-      if (!apiKey?.trim()) {
+      if (auth_strategy !== "openai-oauth" && !apiKey?.trim()) {
         throw createApiError("API key is required", 400, "invalid_request");
+      }
+
+      if (auth_strategy === "openai-oauth" && !account_id?.trim()) {
+        throw createApiError("Account ID is required", 400, "invalid_request");
       }
 
       if (!models || !Array.isArray(models) || models.length === 0) {
@@ -596,6 +626,16 @@ export const registerApiRoutes = async (
             type: { type: "string", enum: ["openai", "anthropic"] },
             baseUrl: { type: "string" },
             apiKey: { type: "string" },
+            auth_strategy: { type: "string", enum: ["api-key", "openai-oauth"] },
+            account_id: { type: "string" },
+            oauth: {
+              type: "object",
+              properties: {
+                client_id: { type: "string" },
+                redirect_uri: { type: "string" },
+                scopes: { type: "array", items: { type: "string" } },
+              },
+            },
             models: { type: "array", items: { type: "string" } },
             enabled: { type: "boolean" },
           },
