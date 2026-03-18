@@ -237,6 +237,13 @@ export interface ConfigProvider {
   api_base_url: string;
   api_key: string;
   models: string[];
+  auth_strategy?: "api-key" | "openai-oauth";
+  account_id?: string;
+  oauth?: {
+    client_id?: string;
+    redirect_uri?: string;
+    scopes?: string[];
+  };
   transformer: {
     use?: string[] | Array<any>[];
   } & {
