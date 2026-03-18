@@ -83,6 +83,26 @@
       }
     },
     {
+      "name": "openai-oauth",
+      "auth_strategy": "openai-oauth",
+      "account_id": "acct_12345678",
+      "api_base_url": "https://api.openai.com/v1/chat/completions",
+      "api_key": "",
+      "models": [
+        "gpt-5.4"
+      ],
+      "oauth": {
+        "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+        "redirect_uri": "http://localhost:3456/oauth/callback",
+        "scopes": [
+          "openid",
+          "email",
+          "profile",
+          "offline_access"
+        ]
+      }
+    },
+    {
       "name": "deepseek",
       "api_base_url": "https://api.deepseek.com/chat/completions",
       "api_key": "sk-",
@@ -169,7 +189,7 @@
     }
   ],
   "Router": {
-    "default": "gemini-cli,gemini-2.5-pro",
+    "default": "openai-oauth,gpt-5.4",
     "background": "gemini-cli,gemini-2.5-flash",
     "think": "gemini-cli,gemini-2.5-pro",
     "longContext": "gemini-cli,gemini-2.5-pro",

@@ -24,6 +24,7 @@
 -   **多提供商支持**: 支持 OpenRouter、DeepSeek、Ollama、Gemini、Volcengine 和 SiliconFlow 等各种模型提供商。
 -   **请求/响应转换**: 使用转换器为不同的提供商自定义请求和响应。
 -   **动态模型切换**: 在 Claude Code 中使用 `/model` 命令动态切换模型。
+-   **OpenAI OAuth 支持**: 可以授权一个或多个 OpenAI 账户，并在不保存原始 OpenAI API Key 的前提下路由 `gpt-5.4` 请求。
 -   **GitHub Actions 集成**: 在您的 GitHub 工作流程中触发 Claude Code 任务。
 -   **插件系统**: 使用自定义转换器扩展功能。
 
@@ -60,6 +61,32 @@ npm install -g @musistudio/claude-code-router
 - **`Providers`**: 用于配置不同的模型提供商。
 - **`Router`**: 用于设置路由规则。`default` 指定默认模型，如果未配置其他路由，则该模型将用于所有请求。
 - **`API_TIMEOUT_MS`**: API 请求超时时间，单位为毫秒。
+
+#### OpenAI OAuth Provider
+
+CCR 也支持 `openai-oauth` provider，用于 Codex / GPT-5.4 路由。最小配置示例如下：
+
+```json
+{
+  "name": "openai-oauth",
+  "auth_strategy": "openai-oauth",
+  "account_id": "acct_12345678",
+  "api_base_url": "https://api.openai.com/v1/chat/completions",
+  "api_key": "",
+  "models": ["gpt-5.4"],
+  "oauth": {
+    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "redirect_uri": "http://localhost:3456/oauth/callback",
+    "scopes": ["openid", "email", "profile", "offline_access"]
+  }
+}
+```
+
+说明：
+
+- `account_id` 用于选择 provider 绑定的 OpenAI 账户；留空时默认使用最近一次授权的账户。
+- `openai-oauth` provider 的 `api_key` 应保持为空，OAuth token 会由 CCR 本地 token vault 管理。
+- `redirect_uri` 需要与本地 CCR 服务回调地址一致，当前默认值是 `http://localhost:3456/oauth/callback`。
 
 这是一个综合示例：
 
@@ -193,6 +220,24 @@ ccr code
 > ```shell
 > ccr restart
 > ```
+
+### OpenAI OAuth 授权流程
+
+如果要通过 OpenAI OAuth provider 路由，请先完成账户授权：
+
+```shell
+ccr oauth login
+ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth status
+```
+
+- `ccr oauth login` 会启动浏览器授权流程。
+- `ccr oauth complete` 是 CLI 的手动回调收尾命令，适合粘贴浏览器地址栏中的 callback URL。
+- `ccr oauth status` 会输出脱敏后的账户信息、过期时间和是否需要重新授权。
+
+Web UI 也新增了 OpenAI OAuth 登录入口，以及 `auth_strategy`、`account_id`、`oauth.redirect_uri` 等 provider 配置项。
+
+发布前仍有一个待确认问题：需要根据 OpenAI 官方文档再次确认最终 scopes，以及上游 OAuth 流程是否支持 `codex_cli_simplified_flow=true`。
 
 ### 4. UI 模式
 

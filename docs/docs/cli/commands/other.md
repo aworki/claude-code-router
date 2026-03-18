@@ -46,6 +46,34 @@ Output shell environment variables for integration with external tools.
 ccr activate
 ```
 
+## ccr oauth
+
+Manage the local OpenAI OAuth flow used by `openai-oauth` providers.
+
+### Start browser authorization
+
+```bash
+ccr oauth login
+```
+
+This starts the local OAuth flow and opens the authorization page in your browser.
+
+### Finish with a pasted callback URL
+
+```bash
+ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+```
+
+Use this command when you want to complete the callback exchange manually from the CLI.
+
+### Show OAuth account status
+
+```bash
+ccr oauth status
+```
+
+This prints redacted account metadata, expiry, and whether re-authentication is required.
+
 ## Global Options
 
 These options can be used with any command:
@@ -75,6 +103,14 @@ ccr restart --config /path/to/config.json
 
 ```bash
 ccr ui
+```
+
+### Run the OAuth flow
+
+```bash
+ccr oauth login
+ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth status
 ```
 
 ## Related Documentation

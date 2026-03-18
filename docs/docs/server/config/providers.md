@@ -6,17 +6,74 @@ sidebar_position: 2
 
 Detailed guide for configuring LLM providers.
 
-## Supported Providers
+## Provider Schema
+
+Providers live under the top-level `Providers` array in `~/.claude-code-router/config.json`.
+
+```json
+{
+  "name": "openrouter",
+  "api_base_url": "https://openrouter.ai/api/v1/chat/completions",
+  "api_key": "sk-or-v1-",
+  "models": ["anthropic/claude-sonnet-4"]
+}
+```
+
+## Common Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Unique provider identifier |
+| `api_base_url` | string | Yes | Full upstream chat/completions URL |
+| `api_key` | string | Usually | Provider API key. Leave empty for `openai-oauth`. |
+| `models` | string[] | Yes | Models exposed through this provider |
+| `auth_strategy` | string | No | `api-key` or `openai-oauth` |
+| `account_id` | string | No | OAuth account binding for `openai-oauth` providers |
+| `oauth.client_id` | string | No | OAuth client ID override |
+| `oauth.redirect_uri` | string | No | Local OAuth callback URI override |
+| `oauth.scopes` | string[] | No | OAuth scope override |
+| `transformer` | object | No | Request/response transformer configuration |
+
+## OpenAI OAuth Example
+
+Use `auth_strategy: "openai-oauth"` when you want CCR to obtain and refresh OpenAI tokens through the local OAuth flow instead of storing a raw OpenAI API key.
+
+```json
+{
+  "name": "openai-oauth",
+  "auth_strategy": "openai-oauth",
+  "account_id": "acct_12345678",
+  "api_base_url": "https://api.openai.com/v1/chat/completions",
+  "api_key": "",
+  "models": ["gpt-5.4"],
+  "oauth": {
+    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "redirect_uri": "http://localhost:3456/oauth/callback",
+    "scopes": ["openid", "email", "profile", "offline_access"]
+  }
+}
+```
+
+Authorize the account before routing traffic to it:
+
+```bash
+ccr oauth login
+ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth status
+```
+
+`ccr oauth status` returns redacted account metadata only. It never prints tokens.
+
+## API-Key Examples
 
 ### DeepSeek
 
 ```json
 {
-  "NAME": "deepseek",
-  "HOST": "https://api.deepseek.com",
-  "APIKEY": "your-api-key",
-  "MODELS": ["deepseek-chat", "deepseek-coder"],
-  "transformers": ["anthropic"]
+  "name": "deepseek",
+  "api_base_url": "https://api.deepseek.com/chat/completions",
+  "api_key": "your-api-key",
+  "models": ["deepseek-chat", "deepseek-coder"]
 }
 ```
 
@@ -24,11 +81,10 @@ Detailed guide for configuring LLM providers.
 
 ```json
 {
-  "NAME": "groq",
-  "HOST": "https://api.groq.com/openai/v1",
-  "APIKEY": "your-api-key",
-  "MODELS": ["llama-3.3-70b-versatile"],
-  "transformers": ["anthropic"]
+  "name": "groq",
+  "api_base_url": "https://api.groq.com/openai/v1/chat/completions",
+  "api_key": "your-api-key",
+  "models": ["llama-3.3-70b-versatile"]
 }
 ```
 
@@ -36,35 +92,12 @@ Detailed guide for configuring LLM providers.
 
 ```json
 {
-  "NAME": "gemini",
-  "HOST": "https://generativelanguage.googleapis.com/v1beta",
-  "APIKEY": "your-api-key",
-  "MODELS": ["gemini-1.5-pro"],
-  "transformers": ["anthropic"]
+  "name": "gemini",
+  "api_base_url": "https://generativelanguage.googleapis.com/v1beta/models/",
+  "api_key": "your-api-key",
+  "models": ["gemini-1.5-pro"]
 }
 ```
-
-### OpenRouter
-
-```json
-{
-  "NAME": "openrouter",
-  "HOST": "https://openrouter.ai/api/v1",
-  "APIKEY": "your-api-key",
-  "MODELS": ["anthropic/claude-3.5-sonnet"],
-  "transformers": ["anthropic"]
-}
-```
-
-## Provider Configuration Options
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `NAME` | string | Yes | Unique provider identifier |
-| `HOST` | string | Yes | API base URL |
-| `APIKEY` | string | Yes | API authentication key |
-| `MODELS` | string[] | No | List of available models |
-| `transformers` | string[] | No | List of transformers to apply |
 
 ## Model Selection
 
@@ -77,7 +110,7 @@ When selecting a model in routing, use the format:
 For example:
 
 ```
-deepseek,deepseek-chat
+openai-oauth,gpt-5.4
 ```
 
 ## Next Steps

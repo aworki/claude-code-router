@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # ccr status
 
-Show the current status of the Claude Code Router server.
+Show the current status of the Claude Code Router server, including OAuth account status when any OpenAI OAuth providers are configured.
 
 ## Usage
 
@@ -18,41 +18,66 @@ ccr status
 
 When the server is running:
 
-```
-Claude Code Router Status: Running
-Version: 2.0.0
-PID: 12345
-Port: 8080
-Uptime: 2h 34m
-Configuration: /home/user/.claude-code-router/config.json
+```text
+📊 Claude Code Router Status
+════════════════════════════════════════
+✅ Status: Running
+🆔 Process ID: 12345
+🌐 Port: 3456
+📡 API Endpoint: http://127.0.0.1:3456
+📄 PID File: ~/.claude-code-router/claude-code-router.pid
+
+🚀 Ready to use! Run the following commands:
+   ccr code    # Start coding with Claude
+   ccr stop    # Stop the service
+
+OAuth Accounts
+══════════════
+- accountKey: e77b122d95cf
+  accountHint: ac...89
+  emailHint: p...n@e...e.com
+  expiresAt: 2026-03-19T00:00:00.000Z
+  invalid: no
+  reauthRequired: no
 ```
 
 ### Stopped Server
 
 When the server is not running:
 
-```
-Claude Code Router Status: Stopped
+```text
+📊 Claude Code Router Status
+════════════════════════════════════════
+❌ Status: Not Running
+
+💡 To start the service:
+   ccr start
 ```
 
-## Exit Codes
+## OAuth Account Output
 
-| Code | Description |
-|------|-------------|
-| 0 | Server is running |
-| 1 | Server is stopped |
-| 2 | Error checking status |
+When OAuth accounts exist, `ccr status` appends an `OAuth Accounts` section with redacted metadata:
+
+- `accountKey`: stable non-PII identifier derived from the account ID
+- `accountHint`: redacted account identifier
+- `emailHint`: redacted email hint, when available
+- `expiresAt`: token expiry timestamp
+- `invalid`: whether the stored token bundle has been marked invalid
+- `reauthRequired`: whether the account needs re-authentication
+
+This output never includes raw tokens or full email addresses.
 
 ## Examples
 
-```bash
+```text
 $ ccr status
 
-Claude Code Router Status: Running
-Version: 2.0.0
-PID: 12345
-Port: 8080
-Uptime: 2h 34m
+📊 Claude Code Router Status
+════════════════════════════════════════
+✅ Status: Running
+🆔 Process ID: 12345
+🌐 Port: 3456
+📡 API Endpoint: http://127.0.0.1:3456
 ```
 
 ## Related Commands
@@ -60,3 +85,4 @@ Uptime: 2h 34m
 - [ccr start](/docs/cli/start) - Start the server
 - [ccr stop](/docs/cli/other-commands#ccr-stop) - Stop the server
 - [ccr restart](/docs/cli/other-commands#ccr-restart) - Restart the server
+- [ccr oauth status](/docs/cli/other-commands#ccr-oauth) - Show OAuth account status only

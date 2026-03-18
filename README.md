@@ -26,6 +26,7 @@
 - **Request/Response Transformation**: Customize requests and responses for different providers using transformers.
 - **Dynamic Model Switching**: Switch models on-the-fly within Claude Code using the `/model` command.
 - **CLI Model Management**: Manage models and providers directly from the terminal with `ccr model`.
+- **OpenAI OAuth Support**: Authorize one or more OpenAI accounts and route `gpt-5.4` traffic without storing a raw OpenAI API key.
 - **GitHub Actions Integration**: Trigger Claude Code tasks in your GitHub workflows.
 - **Plugin System**: Extend functionality with custom transformers.
 
@@ -85,6 +86,32 @@ Claude Code Router supports environment variable interpolation for secure API ke
 ```
 
 This allows you to keep sensitive API keys in environment variables instead of hardcoding them in configuration files. The interpolation works recursively through nested objects and arrays.
+
+#### OpenAI OAuth Provider
+
+CCR also supports an `openai-oauth` provider for Codex/GPT-5.4 style routing. A minimal provider looks like this:
+
+```json
+{
+  "name": "openai-oauth",
+  "auth_strategy": "openai-oauth",
+  "account_id": "acct_12345678",
+  "api_base_url": "https://api.openai.com/v1/chat/completions",
+  "api_key": "",
+  "models": ["gpt-5.4"],
+  "oauth": {
+    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "redirect_uri": "http://localhost:3456/oauth/callback",
+    "scopes": ["openid", "email", "profile", "offline_access"]
+  }
+}
+```
+
+Notes:
+
+- `account_id` selects which authorized OpenAI account the provider should use. Leave it empty to use the most recently authorized account.
+- `api_key` should be empty for `openai-oauth` providers. CCR stores OAuth tokens in the local token vault instead.
+- `redirect_uri` should match the local CCR server callback path. The current default is `http://localhost:3456/oauth/callback`.
 
 Here is a comprehensive example:
 
@@ -218,6 +245,24 @@ ccr code
 > ```shell
 > ccr restart
 > ```
+
+### OpenAI OAuth Flow
+
+If you want to route through an OpenAI OAuth-backed provider, authorize an account first:
+
+```shell
+ccr oauth login
+ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth status
+```
+
+- `ccr oauth login` starts the browser authorization flow.
+- `ccr oauth complete` is the CLI manual fallback that finishes the callback exchange with a pasted callback URL.
+- `ccr oauth status` shows redacted account metadata, expiry, and whether re-authentication is required.
+
+The Web UI also exposes an OpenAI OAuth login entry point and provider settings for `auth_strategy`, `account_id`, and `oauth.redirect_uri`.
+
+Open question before release: confirm the final OpenAI-required scopes and whether `codex_cli_simplified_flow=true` is supported in the upstream OAuth flow.
 
 ### 4. UI Mode
 
