@@ -645,6 +645,25 @@ export const registerApiRoutes = async (
       }>,
       reply
     ) => {
+      const existingProvider = fastify.providerService.getProvider(
+        request.params.id
+      );
+      if (!existingProvider) {
+        throw createApiError("Provider not found", 404, "provider_not_found");
+      }
+
+      const effectiveProvider = {
+        ...existingProvider,
+        ...request.body,
+      };
+
+      if (
+        effectiveProvider.auth_strategy !== "openai-oauth" &&
+        !effectiveProvider.apiKey?.trim()
+      ) {
+        throw createApiError("API key is required", 400, "invalid_request");
+      }
+
       const provider = fastify.providerService.updateProvider(
         request.params.id,
         request.body
