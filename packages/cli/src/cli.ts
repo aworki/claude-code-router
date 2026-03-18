@@ -3,6 +3,13 @@ import { run, restartService } from "./utils";
 import { showStatus } from "./utils/status";
 import { executeCodeCommand, PresetConfig } from "./utils/codeCommand";
 import {
+  captureOAuthLoginSession,
+  fetchOAuthStatus,
+  formatOAuthAccounts,
+  openExternalUrl,
+  postOAuthComplete,
+} from "./utils/oauth";
+import {
   cleanupPidFile,
   isServiceRunning,
   getServiceInfo,
@@ -31,6 +38,7 @@ const KNOWN_COMMANDS = [
   "statusline",
   "code",
   "model",
+  "oauth",
   "preset",
   "install",
   "activate",
@@ -53,6 +61,7 @@ Commands:
   statusline    Integrated statusline
   code          Execute claude command
   model         Interactive model selection and configuration
+  oauth         Manage OpenAI OAuth login and status
   preset        Manage presets (export, install, list, delete)
   install       Install preset from GitHub marketplace
   activate      Output environment variables for shell integration
@@ -94,6 +103,90 @@ async function waitForService(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
+}
+
+async function startServiceIfNeeded() {
+  if (isServiceRunning()) {
+    return;
+  }
+
+  console.log("Service not running, starting service...");
+  const cliPath = join(__dirname, "cli.js");
+  const startProcess = spawn("node", [cliPath, "start"], {
+    detached: true,
+    stdio: "ignore",
+  });
+
+  startProcess.on("error", (error) => {
+    console.error("Failed to start service:", error.message);
+    process.exit(1);
+  });
+
+  startProcess.unref();
+
+  if (!(await waitForService())) {
+    console.error(
+      "Service startup timeout, please manually run `ccr start` to start the service"
+    );
+    process.exit(1);
+  }
+}
+
+async function handleOAuthCommand(args: string[]) {
+  const subcommand = args[0];
+
+  switch (subcommand) {
+    case "login": {
+      await startServiceIfNeeded();
+      const serviceInfo = await getServiceInfo();
+      const authorizationUrl = await captureOAuthLoginSession(serviceInfo.endpoint);
+      await openExternalUrl(authorizationUrl);
+      break;
+    }
+    case "complete": {
+      await startServiceIfNeeded();
+      const callbackUrl = args[1];
+      if (!callbackUrl) {
+        console.error("Usage: ccr oauth complete <callback-url>");
+        process.exit(1);
+      }
+
+      const serviceInfo = await getServiceInfo();
+      const result = await postOAuthComplete(serviceInfo.endpoint, callbackUrl);
+      console.log(
+        typeof result?.success === "boolean" && result.success
+          ? "OAuth completion submitted successfully."
+          : JSON.stringify(result, null, 2)
+      );
+      break;
+    }
+    case "status": {
+      const serviceInfo = await getServiceInfo();
+      if (!serviceInfo.running) {
+        console.log("Service not running. Start it with `ccr start` first.");
+        process.exit(1);
+      }
+
+      const oauthStatus = await fetchOAuthStatus(serviceInfo.endpoint);
+      const output = formatOAuthAccounts(oauthStatus.accounts);
+      if (output) {
+        console.log(output);
+      } else {
+        console.log("No OAuth accounts configured.");
+      }
+      break;
+    }
+    default:
+      console.log(
+        [
+          "Usage: ccr oauth <login|complete|status>",
+          "  login    Open the OpenAI OAuth login flow in your browser",
+          "  complete Submit a callback URL to finish OAuth authorization",
+          "  status   Show OAuth account status for the local CCR server",
+        ].join("\n")
+      );
+      process.exit(1);
+  }
 }
 
 async function main() {
@@ -264,6 +357,9 @@ async function main() {
     // ADD THIS CASE
     case "model":
       await runModelSelector();
+      break;
+    case "oauth":
+      await handleOAuthCommand(process.argv.slice(3));
       break;
     case "preset":
       await handlePresetCommand(process.argv.slice(3));
