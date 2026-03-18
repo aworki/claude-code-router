@@ -13,6 +13,7 @@ export interface StoredTokenBundle {
 export interface StoredTokenRecord {
   bundle: StoredTokenBundle;
   savedAt: string;
+  writeOrder?: number;
 }
 
 export interface TokenVault {

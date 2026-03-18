@@ -54,6 +54,7 @@ export class FileTokenVault implements TokenVault {
   private readonly passphrase: string;
   private readonly now: () => number;
   private readonly keychain: Promise<TokenVaultKeychain | null>;
+  private nextWriteOrder = 0;
 
   constructor(options: FileTokenVaultOptions) {
     this.rootDir = options.rootDir ?? DEFAULT_ROOT_DIR;
@@ -68,7 +69,7 @@ export class FileTokenVault implements TokenVault {
   async save(bundle: StoredTokenBundle): Promise<void> {
     await mkdir(this.rootDir, { recursive: true });
 
-    const record = createStoredTokenRecord(bundle, this.now);
+    const record = createStoredTokenRecord(bundle, this.now, ++this.nextWriteOrder);
     const keychain = await this.keychain;
     let keychainError: unknown = undefined;
     let keychainSaved = false;
@@ -113,7 +114,7 @@ export class FileTokenVault implements TokenVault {
     const merged = new Map<string, StoredTokenRecord>();
     for (const record of [...fileRecords, ...keychainRecords]) {
       const current = merged.get(record.bundle.accountId);
-      if (!current || compareRecords(record, current) >= 0) {
+      if (!current || compareRecords(record, current) > 0) {
         merged.set(record.bundle.accountId, record);
       }
     }
@@ -160,7 +161,7 @@ export class FileTokenVault implements TokenVault {
       if (isMissingFileError(error)) {
         return null;
       }
-      throw error;
+      return null;
     }
   }
 
@@ -183,7 +184,7 @@ export class FileTokenVault implements TokenVault {
       if (isMissingFileError(error)) {
         return null;
       }
-      throw error;
+      return null;
     }
   }
 
@@ -221,10 +222,12 @@ export class FileTokenVault implements TokenVault {
 function createStoredTokenRecord(
   bundle: StoredTokenBundle,
   now: () => number,
+  writeOrder: number,
 ): StoredTokenRecord {
   return {
     bundle,
     savedAt: new Date(now()).toISOString(),
+    writeOrder,
   };
 }
 
@@ -298,16 +301,27 @@ function chooseNewestRecord(
 ) {
   if (!fileRecord) return keychainRecord;
   if (!keychainRecord) return fileRecord;
-  return compareRecords(keychainRecord, fileRecord) >= 0 ? keychainRecord : fileRecord;
+  return compareRecords(fileRecord, keychainRecord) >= 0 ? fileRecord : keychainRecord;
 }
 
 function compareRecords(left: StoredTokenRecord, right: StoredTokenRecord) {
-  return parseSavedAt(left.savedAt) - parseSavedAt(right.savedAt);
+  const timestampDelta = parseSavedAt(left.savedAt) - parseSavedAt(right.savedAt);
+  if (timestampDelta !== 0) {
+    return timestampDelta;
+  }
+
+  return resolveWriteOrder(left) - resolveWriteOrder(right);
 }
 
 function parseSavedAt(savedAt: string) {
   const timestamp = Date.parse(savedAt);
   return Number.isFinite(timestamp) ? timestamp : -Infinity;
+}
+
+function resolveWriteOrder(record: StoredTokenRecord) {
+  return typeof record.writeOrder === "number" && Number.isFinite(record.writeOrder)
+    ? record.writeOrder
+    : 0;
 }
 
 async function getSystemKeychain(): Promise<TokenVaultKeychain | null> {
@@ -393,6 +407,7 @@ function isStoredTokenRecord(value: unknown): value is StoredTokenRecord {
   return Boolean(
     record.bundle &&
       typeof record.savedAt === "string" &&
+      (record.writeOrder === undefined || typeof record.writeOrder === "number") &&
       typeof record.bundle.accountId === "string" &&
       typeof record.bundle.accessToken === "string" &&
       typeof record.bundle.refreshToken === "string" &&
