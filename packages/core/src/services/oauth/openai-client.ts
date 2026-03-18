@@ -7,7 +7,7 @@ import type {
   TokenVault,
 } from "./types";
 
-const DEFAULT_TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token";
+export const DEFAULT_OPENAI_TOKEN_ENDPOINT = "https://auth0.openai.com/oauth/token";
 
 export interface OpenAIOAuthClientOptions {
   clientId: string;
@@ -30,7 +30,7 @@ export class OpenAIOAuthClient {
     this.clientId = options.clientId;
     this.vault = options.vault;
     this.fetchImpl = options.fetch ?? fetch;
-    this.tokenEndpoint = options.tokenEndpoint ?? DEFAULT_TOKEN_ENDPOINT;
+    this.tokenEndpoint = options.tokenEndpoint ?? DEFAULT_OPENAI_TOKEN_ENDPOINT;
     this.now = options.now ?? Date.now;
     this.validateIdTokenImpl = options.validateIdToken ?? validateIdToken;
   }
@@ -52,7 +52,7 @@ export class OpenAIOAuthClient {
     const payload = await parseRefreshResponse(response);
     if (!response.ok || !payload.access_token) {
       if (payload.error === "invalid_grant") {
-        await this.vault.markInvalid(input.accountId);
+        await this.vault.markInvalid(input.accountId, input.refreshToken);
       }
       throw new Error(payload.error_description ?? payload.error ?? "Failed to refresh OAuth token");
     }

@@ -10,16 +10,22 @@ export interface StoredTokenBundle {
   invalid?: boolean;
 }
 
+export interface StoredTokenRecord {
+  bundle: StoredTokenBundle;
+  savedAt: string;
+}
+
 export interface TokenVault {
   save(bundle: StoredTokenBundle): Promise<void>;
   get(accountId: string): Promise<StoredTokenBundle | null>;
   list(): Promise<StoredTokenBundle[]>;
-  markInvalid(accountId: string): Promise<void>;
+  markInvalid(accountId: string, refreshToken: string): Promise<boolean>;
 }
 
 export interface TokenVaultKeychain {
-  save(bundle: StoredTokenBundle): Promise<void>;
-  get(accountId: string): Promise<StoredTokenBundle | null>;
+  save(record: StoredTokenRecord): Promise<void>;
+  get(accountId: string): Promise<StoredTokenRecord | null>;
+  list?(): Promise<StoredTokenRecord[]>;
 }
 
 export interface RefreshTokenInput {

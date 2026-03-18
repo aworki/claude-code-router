@@ -5,8 +5,8 @@ import {
   type JWTPayload,
 } from "jose";
 
-const JWKS_URL = "https://auth.openai.com/.well-known/jwks.json";
-const ISSUER = "https://auth.openai.com/";
+export const OPENAI_JWKS_URL = "https://auth.openai.com/.well-known/jwks.json";
+export const OPENAI_OIDC_ISSUER = "https://auth0.openai.com/";
 
 export interface ValidateIdTokenOptions {
   fetch?: typeof fetch;
@@ -20,11 +20,11 @@ export async function validateIdToken(
   options: ValidateIdTokenOptions = {},
 ): Promise<JWTPayload> {
   const jwks = createRemoteJWKSet(
-    new URL(options.jwksUrl ?? JWKS_URL),
+    new URL(options.jwksUrl ?? OPENAI_JWKS_URL),
     options.fetch ? { [customFetch]: options.fetch } : undefined,
   );
   const { payload } = await jwtVerify(idToken, jwks, {
-    issuer: options.issuer ?? ISSUER,
+    issuer: options.issuer ?? OPENAI_OIDC_ISSUER,
     audience: clientId,
   });
   return payload;
