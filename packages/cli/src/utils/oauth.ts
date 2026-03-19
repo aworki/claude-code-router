@@ -10,6 +10,7 @@ export interface OAuthAccountStatus {
   accountKey: string;
   accountHint: string;
   emailHint?: string;
+  source?: "oauth" | "codex-cli";
   expiresAt: string;
   invalid: boolean;
   reauthRequired: boolean;
@@ -21,6 +22,13 @@ export interface OAuthStatusResponse {
 
 export interface OAuthStorageOptions {
   rootDir?: string;
+}
+
+export interface OAuthCompleteResponse {
+  success?: boolean;
+  accountId?: string;
+  email?: string;
+  expiresAt?: string;
 }
 
 export function getOAuthLoginUrl(baseUrl: string) {
@@ -81,7 +89,7 @@ export async function captureOAuthLoginSession(
   });
 
   if (response.status < 300 || response.status >= 400) {
-    throw new Error(`OAuth login failed (${response.status})`);
+    throw new Error(await formatOAuthError(response, `OAuth login failed (${response.status})`));
   }
 
   const authorizationUrl = response.headers.get("location");
@@ -101,7 +109,7 @@ export async function captureOAuthLoginSession(
 export async function fetchOAuthStatus(baseUrl: string): Promise<OAuthStatusResponse> {
   const response = await fetch(getOAuthStatusUrl(baseUrl));
   if (!response.ok) {
-    throw new Error(`Failed to load OAuth status (${response.status})`);
+    throw new Error(await formatOAuthError(response, `Failed to load OAuth status (${response.status})`));
   }
 
   return (await response.json()) as OAuthStatusResponse;
@@ -111,7 +119,7 @@ export async function postOAuthComplete(
   baseUrl: string,
   callbackUrl: string,
   options?: OAuthStorageOptions,
-) {
+): Promise<OAuthCompleteResponse> {
   const cookie = await loadOAuthLoginCookie(options);
   if (!cookie) {
     throw new Error("No stored OAuth login cookie found. Run `ccr oauth login` first.");
@@ -134,7 +142,31 @@ export async function postOAuthComplete(
     );
   }
 
-  return payload;
+  return payload as OAuthCompleteResponse;
+}
+
+async function formatOAuthError(response: Response, fallbackMessage: string) {
+  const payload = await readOAuthErrorJson(response);
+  if (typeof payload?.error === "string" && payload.error.trim()) {
+    return payload.error;
+  }
+
+  const text = await readOAuthErrorText(response);
+  if (text.trim()) {
+    return text.trim();
+  }
+
+  return fallbackMessage;
+}
+
+async function readOAuthErrorJson(response: Response) {
+  const clone = typeof response.clone === "function" ? response.clone() : response;
+  return clone.json().catch(() => null);
+}
+
+async function readOAuthErrorText(response: Response) {
+  const clone = typeof response.clone === "function" ? response.clone() : response;
+  return clone.text().catch(() => "");
 }
 
 export function formatOAuthAccounts(accounts: OAuthAccountStatus[]) {
@@ -153,12 +185,29 @@ export function formatOAuthAccounts(accounts: OAuthAccountStatus[]) {
     if (account.emailHint) {
       lines.push(`  emailHint: ${account.emailHint}`);
     }
+    if (account.source) {
+      lines.push(`  source: ${account.source}`);
+    }
     lines.push(`  expiresAt: ${account.expiresAt}`);
     lines.push(`  invalid: ${account.invalid ? "yes" : "no"}`);
     lines.push(`  reauthRequired: ${account.reauthRequired ? "yes" : "no"}`);
   }
 
   return lines.join("\n");
+}
+
+export function bindOAuthProviderAccount(config: any, accountId: string) {
+  const nextConfig = structuredClone(config);
+  const providers = nextConfig.Providers || nextConfig.providers || [];
+
+  for (const provider of providers) {
+    if (provider?.auth_strategy === "openai-oauth") {
+      provider.account_id = accountId;
+      break;
+    }
+  }
+
+  return nextConfig;
 }
 
 export function getOAuthLoginGuidance() {

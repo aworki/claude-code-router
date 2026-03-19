@@ -61,7 +61,7 @@ This starts the local OAuth flow and opens the authorization page in your browse
 ### Finish with a pasted callback URL
 
 ```bash
-ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
 ```
 
 Use this command when you want to complete the callback exchange manually from the CLI.
@@ -109,7 +109,7 @@ ccr ui
 
 ```bash
 ccr oauth login
-ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
 ccr oauth status
 ```
 

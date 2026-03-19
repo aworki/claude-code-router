@@ -11,6 +11,7 @@ export const apiKeyAuth =
       "/health",
       "/oauth/login",
       "/oauth/callback",
+      "/auth/callback",
       "/oauth/complete",
       "/api/oauth/status",
     ];

@@ -3,6 +3,7 @@ import { run, restartService } from "./utils";
 import { showStatus } from "./utils/status";
 import { executeCodeCommand, PresetConfig } from "./utils/codeCommand";
 import {
+  bindOAuthProviderAccount,
   captureOAuthLoginSession,
   fetchOAuthStatus,
   formatOAuthAccounts,
@@ -12,12 +13,11 @@ import {
 } from "./utils/oauth";
 import {
   cleanupPidFile,
-  isServiceRunning,
   getServiceInfo,
 } from "./utils/processCheck";
 import { runModelSelector } from "./utils/modelSelector";
 import { activateCommand } from "./utils/activateCommand";
-import { readConfigFile } from "./utils";
+import { readConfigFile, writeConfigFile } from "./utils";
 import { version } from "../package.json";
 import { spawn, exec } from "child_process";
 import {getPresetDir, loadConfigFromManifest, PID_FILE, readPresetFile, REFERENCE_COUNT_FILE} from "@CCR/shared";
@@ -95,8 +95,8 @@ async function waitForService(
 
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
-    const isRunning = isServiceRunning()
-    if (isRunning) {
+    const serviceInfo = await getServiceInfo();
+    if (serviceInfo.running) {
       // Wait for an additional short period to ensure service is fully ready
       await new Promise((resolve) => setTimeout(resolve, 500));
       return true;
@@ -107,7 +107,8 @@ async function waitForService(
 }
 
 async function startServiceIfNeeded() {
-  if (isServiceRunning()) {
+  const serviceInfo = await getServiceInfo();
+  if (serviceInfo.running) {
     return;
   }
 
@@ -155,6 +156,10 @@ async function handleOAuthCommand(args: string[]) {
 
       const serviceInfo = await getServiceInfo();
       const result = await postOAuthComplete(serviceInfo.endpoint, callbackUrl);
+      if (typeof result?.accountId === "string" && result.accountId) {
+        const config = await readConfigFile();
+        await writeConfigFile(bindOAuthProviderAccount(config, result.accountId));
+      }
       console.log(
         typeof result?.success === "boolean" && result.success
           ? "OAuth completion submitted successfully."
@@ -192,7 +197,8 @@ async function handleOAuthCommand(args: string[]) {
 }
 
 async function main() {
-  const isRunning = isServiceRunning()
+  const serviceInfo = await getServiceInfo();
+  const isRunning = serviceInfo.running;
 
   // If command is not a known command, check if it's a preset
   if (command && !KNOWN_COMMANDS.includes(command)) {

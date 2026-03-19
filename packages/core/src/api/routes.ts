@@ -13,6 +13,10 @@ import { ProviderService } from "@/services/provider";
 import { TransformerService } from "@/services/transformer";
 import { Transformer } from "@/types/transformer";
 import { OAuthService } from "@/services/oauth/service";
+import {
+  assertOpenAIOAuthProviderLimit,
+  OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+} from "@/services/oauth/config";
 
 // Extend FastifyInstance to include custom services
 declare module "fastify" {
@@ -559,6 +563,25 @@ export const registerApiRoutes = async (
         throw createApiError("API key is required", 400, "invalid_request");
       }
 
+      try {
+        assertOpenAIOAuthProviderLimit(
+          fastify.providerService.getProviders().map((provider) => ({
+            name: provider.name,
+            auth_strategy: provider.auth_strategy,
+          })),
+          {
+            name,
+            auth_strategy,
+          },
+        );
+      } catch {
+        throw createApiError(
+          OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+          400,
+          "invalid_request"
+        );
+      }
+
       if (!models || !Array.isArray(models) || models.length === 0) {
         throw createApiError(
           "At least one model is required",
@@ -668,6 +691,26 @@ export const registerApiRoutes = async (
         !effectiveProvider.apiKey?.trim()
       ) {
         throw createApiError("API key is required", 400, "invalid_request");
+      }
+
+      try {
+        assertOpenAIOAuthProviderLimit(
+          fastify.providerService.getProviders().map((provider) => ({
+            name: provider.name,
+            auth_strategy: provider.auth_strategy,
+          })),
+          {
+            name: effectiveProvider.name,
+            auth_strategy: effectiveProvider.auth_strategy,
+          },
+          request.params.id
+        );
+      } catch {
+        throw createApiError(
+          OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+          400,
+          "invalid_request"
+        );
       }
 
       const provider = fastify.providerService.updateProvider(

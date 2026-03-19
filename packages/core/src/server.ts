@@ -230,6 +230,10 @@ class Server {
 
   async start(): Promise<void> {
     try {
+      await this.oauthService.syncExternalCredentials().catch((error) => {
+        this.app.log.warn({ error }, "Failed to sync Codex CLI credential");
+      });
+
       this.app._server = this;
 
       this.app.addHook("preHandler", (req, reply, done) => {
@@ -349,7 +353,7 @@ function normalizeServerInitialConfig(initialConfig: AppConfig | undefined, inst
 function buildDefaultOAuthRedirectUri(host: string | undefined, port: string | number | undefined) {
   const normalizedPort = port ?? 3456;
   const normalizedHost = normalizeOAuthRedirectHost(host);
-  return `http://${normalizedHost}:${normalizedPort}/oauth/callback`;
+  return `http://${normalizedHost}:${normalizedPort}/auth/callback`;
 }
 
 function normalizeOAuthRedirectHost(host: string | undefined) {

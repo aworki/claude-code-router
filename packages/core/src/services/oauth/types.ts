@@ -6,6 +6,7 @@ export interface StoredTokenBundle {
   refreshToken: string;
   idToken?: string;
   email?: string;
+  source?: "oauth" | "codex-cli";
   expiresAt: string;
   invalid?: boolean;
 }
@@ -43,7 +44,17 @@ export interface RefreshTokenResponse {
   error_description?: string;
 }
 
-export type IdTokenValidator = (idToken: string, clientId: string) => Promise<JWTPayload>;
+export interface IdTokenValidationOptions {
+  jwksUrl?: string;
+  issuer?: string;
+  audience?: string;
+}
+
+export type IdTokenValidator = (
+  idToken: string,
+  clientId: string,
+  options?: IdTokenValidationOptions,
+) => Promise<JWTPayload>;
 
 export interface ExchangeAuthorizationCodeInput {
   code: string;
@@ -66,6 +77,7 @@ export interface OAuthStatusAccount {
   accountKey: string;
   accountHint: string;
   emailHint?: string;
+  source?: "oauth" | "codex-cli";
   expiresAt: string;
   invalid: boolean;
   reauthRequired: boolean;

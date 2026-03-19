@@ -8,7 +8,10 @@ import {
 } from "../types/llm";
 import { ConfigService } from "./config"; 
 import { TransformerService } from "./transformer";
-import { normalizeOAuthProviderConfig } from "./oauth/config";
+import {
+  normalizeOAuthProviderConfig,
+  OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+} from "./oauth/config";
 
 export class ProviderService {
   private providers: Map<string, LLMProvider> = new Map();
@@ -28,6 +31,8 @@ export class ProviderService {
   }
 
   private initializeFromProvidersArray(providersConfig: ConfigProvider[]) {
+    let oauthProviderRegistered = false;
+
     providersConfig.forEach((providerConfig: ConfigProvider) => {
       try {
         const normalizedProviderConfig = normalizeOAuthProviderConfig(
@@ -42,6 +47,16 @@ export class ProviderService {
           (requiresApiKey && !normalizedProviderConfig.api_key)
         ) {
           return;
+        }
+
+        if (normalizedProviderConfig.auth_strategy === "openai-oauth") {
+          if (oauthProviderRegistered) {
+            this.logger.error(
+              `${normalizedProviderConfig.name} provider registered error: ${OPENAI_OAUTH_SINGLE_PROVIDER_ERROR}`,
+            );
+            return;
+          }
+          oauthProviderRegistered = true;
         }
 
         const transformer: LLMProvider["transformer"] = {}

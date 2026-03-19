@@ -18,7 +18,7 @@ ccr status
 
 When the server is running:
 
-```text
+```
 📊 Claude Code Router Status
 ════════════════════════════════════════
 ✅ Status: Running
@@ -45,7 +45,7 @@ OAuth Accounts
 
 When the server is not running:
 
-```text
+```
 📊 Claude Code Router Status
 ════════════════════════════════════════
 ❌ Status: Not Running
@@ -69,7 +69,7 @@ This output never includes raw tokens or full email addresses.
 
 ## Examples
 
-```text
+```bash
 $ ccr status
 
 📊 Claude Code Router Status

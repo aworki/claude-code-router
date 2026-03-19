@@ -7,6 +7,10 @@ interface ResponsesAPIOutputItem {
   call_id?: string;
   name?: string;
   arguments?: string;
+  summary?: Array<{
+    type?: string;
+    text?: string;
+  }>;
   content?: Array<{
     type: string;
     text?: string;
@@ -64,6 +68,95 @@ interface ResponsesStreamEvent {
   reasoning_summary?: string; // 添加推理摘要支持
 }
 
+type ReplayableOpenAIReasoningItem = {
+  id: string;
+  type: string;
+  [key: string]: any;
+};
+
+function parseReplayableOpenAIReasoningSignature(
+  value: unknown,
+): ReplayableOpenAIReasoningItem | null {
+  if (!value) {
+    return null;
+  }
+
+  let candidate: ReplayableOpenAIReasoningItem | null = null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+      return null;
+    }
+    try {
+      candidate = JSON.parse(trimmed) as ReplayableOpenAIReasoningItem;
+    } catch {
+      return null;
+    }
+  } else if (typeof value === "object") {
+    candidate = value as ReplayableOpenAIReasoningItem;
+  }
+
+  if (!candidate) {
+    return null;
+  }
+
+  if (typeof candidate.id !== "string" || !candidate.id.startsWith("rs_")) {
+    return null;
+  }
+
+  if (typeof candidate.type !== "string") {
+    return null;
+  }
+
+  if (candidate.type !== "reasoning" && !candidate.type.startsWith("reasoning.")) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function hasReplayableAssistantContent(content: unknown): boolean {
+  if (typeof content === "string") {
+    return content.trim().length > 0;
+  }
+
+  return Array.isArray(content) && content.length > 0;
+}
+
+function mergeThinkingIntoAssistantContent(content: unknown, thinkingText: string): unknown {
+  const normalizedThinking = thinkingText.trim();
+  if (!normalizedThinking) {
+    return content;
+  }
+
+  if (typeof content === "string") {
+    return [normalizedThinking, content].filter(Boolean).join("\n\n");
+  }
+
+  if (Array.isArray(content)) {
+    return [
+      {
+        type: "output_text",
+        text: normalizedThinking,
+      },
+      ...content,
+    ];
+  }
+
+  return normalizedThinking;
+}
+
+function stringifyReasoningSummary(summary: ResponsesAPIOutputItem["summary"]): string {
+  if (!Array.isArray(summary)) {
+    return "";
+  }
+
+  return summary
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export class OpenAIResponsesTransformer implements Transformer {
   name = "openai-responses";
   endPoint = "/v1/responses";
@@ -110,6 +203,19 @@ export class OpenAIResponsesTransformer implements Transformer {
     request.messages.forEach((message) => {
       if (message.role === "system") return;
 
+      const normalizedMessage: any = { ...message };
+      delete normalizedMessage.cache_control;
+
+      const replayableReasoningItem =
+        message.role === "assistant"
+          ? parseReplayableOpenAIReasoningSignature(normalizedMessage.thinking?.signature)
+          : null;
+      const downgradedThinkingText =
+        message.role === "assistant" && !replayableReasoningItem
+          ? String(normalizedMessage.thinking?.content || "").trim()
+          : "";
+      delete normalizedMessage.thinking;
+
       if (Array.isArray(message.content)) {
         const convertedContent = message.content
           .map((content) => this.normalizeRequestContent(content, message.role))
@@ -118,18 +224,36 @@ export class OpenAIResponsesTransformer implements Transformer {
           );
 
         if (convertedContent.length > 0) {
-          (message as any).content = convertedContent;
+          normalizedMessage.content = convertedContent;
         } else {
-          delete (message as any).content;
+          delete normalizedMessage.content;
         }
       }
 
+      if (message.role === "assistant" && downgradedThinkingText) {
+        normalizedMessage.content = mergeThinkingIntoAssistantContent(
+          normalizedMessage.content,
+          downgradedThinkingText,
+        );
+      }
+
+      const hasAssistantFollowupContent =
+        hasReplayableAssistantContent(normalizedMessage.content) ||
+        (message.role === "assistant" &&
+          Array.isArray(message.tool_calls) &&
+          message.tool_calls.length > 0);
+
+      if (message.role === "assistant" && replayableReasoningItem && hasAssistantFollowupContent) {
+        input.push(replayableReasoningItem);
+      }
+
       if (message.role === "tool") {
-        const toolMessage: any = { ...message };
+        const toolMessage: any = { ...normalizedMessage };
         toolMessage.type = "function_call_output";
         toolMessage.call_id = message.tool_call_id;
         toolMessage.output = message.content;
         delete toolMessage.cache_control;
+        delete toolMessage.thinking;
         delete toolMessage.role;
         delete toolMessage.tool_call_id;
         delete toolMessage.content;
@@ -138,6 +262,11 @@ export class OpenAIResponsesTransformer implements Transformer {
       }
 
       if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
+        if (hasReplayableAssistantContent(normalizedMessage.content)) {
+          const assistantMessage = { ...normalizedMessage };
+          delete assistantMessage.tool_calls;
+          input.push(assistantMessage);
+        }
         message.tool_calls.forEach((tool) => {
           input.push({
             type: "function_call",
@@ -149,7 +278,11 @@ export class OpenAIResponsesTransformer implements Transformer {
         return;
       }
 
-      input.push(message);
+      if (message.role === "assistant" && !hasReplayableAssistantContent(normalizedMessage.content)) {
+        return;
+      }
+
+      input.push(normalizedMessage);
     });
 
     (request as any).input = input;
@@ -525,6 +658,33 @@ export class OpenAIResponsesTransformer implements Transformer {
                           )
                         );
                       } else if (
+                        data.type === "response.codex_reasoning_item.done" &&
+                        data.item?.type === "reasoning"
+                      ) {
+                        const thinkingChunk = {
+                          id: data.item.id || "chatcmpl-" + Date.now(),
+                          object: "chat.completion.chunk",
+                          created: Math.floor(Date.now() / 1000),
+                          model: data.response?.model,
+                          choices: [
+                            {
+                              index: currentIndex,
+                              delta: {
+                                thinking: {
+                                  signature: JSON.stringify(data.item),
+                                },
+                              },
+                              finish_reason: null,
+                            },
+                          ],
+                        };
+
+                        controller.enqueue(
+                          encoder.encode(
+                            `data: ${JSON.stringify(thinkingChunk)}\n\n`
+                          )
+                        );
+                      } else if (
                         data.type === "response.reasoning_summary_part.done" &&
                         data.part
                       ) {
@@ -671,8 +831,18 @@ export class OpenAIResponsesTransformer implements Transformer {
     let toolCalls = null;
     let thinking = null;
 
+    const reasoningOutput = responseData.output?.find(
+      (item) => item.type === "reasoning",
+    );
+
     // 处理推理内容
-    if (messageOutput && messageOutput.reasoning) {
+    if (reasoningOutput) {
+      const summary = stringifyReasoningSummary(reasoningOutput.summary);
+      thinking = {
+        content: summary || messageOutput?.reasoning || "",
+        signature: JSON.stringify(reasoningOutput),
+      };
+    } else if (messageOutput && messageOutput.reasoning) {
       thinking = {
         content: messageOutput.reasoning,
       };

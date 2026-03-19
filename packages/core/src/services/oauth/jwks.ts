@@ -6,12 +6,13 @@ import {
 } from "jose";
 
 export const OPENAI_JWKS_URL = "https://auth.openai.com/.well-known/jwks.json";
-export const OPENAI_OIDC_ISSUER = "https://auth0.openai.com/";
+export const OPENAI_OIDC_ISSUER = "https://auth.openai.com";
 
 export interface ValidateIdTokenOptions {
   fetch?: typeof fetch;
   jwksUrl?: string;
   issuer?: string;
+  audience?: string;
 }
 
 export async function validateIdToken(
@@ -25,7 +26,7 @@ export async function validateIdToken(
   );
   const { payload } = await jwtVerify(idToken, jwks, {
     issuer: options.issuer ?? OPENAI_OIDC_ISSUER,
-    audience: clientId,
+    audience: options.audience ?? clientId,
   });
   return payload;
 }

@@ -8,14 +8,18 @@ import type {
   TokenVault,
 } from "./types";
 
-export const DEFAULT_OPENAI_AUTHORIZE_ENDPOINT = "https://auth0.openai.com/authorize";
-export const DEFAULT_OPENAI_TOKEN_ENDPOINT = "https://auth0.openai.com/oauth/token";
+export const DEFAULT_OPENAI_AUTHORIZE_ENDPOINT = "https://auth.openai.com/oauth/authorize";
+export const DEFAULT_OPENAI_TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token";
 
 export interface OpenAIOAuthClientOptions {
   clientId: string;
   vault: TokenVault;
   fetch?: typeof fetch;
   tokenEndpoint?: string;
+  tokenParams?: Record<string, string>;
+  issuer?: string;
+  audience?: string;
+  jwksUrl?: string;
   now?: () => number;
   validateIdToken?: IdTokenValidator;
 }
@@ -25,6 +29,10 @@ export class OpenAIOAuthClient {
   private readonly vault: TokenVault;
   private readonly fetchImpl: typeof fetch;
   private readonly tokenEndpoint: string;
+  private readonly tokenParams?: Record<string, string>;
+  private readonly issuer?: string;
+  private readonly audience?: string;
+  private readonly jwksUrl?: string;
   private readonly now: () => number;
   private readonly validateIdTokenImpl: IdTokenValidator;
 
@@ -33,6 +41,10 @@ export class OpenAIOAuthClient {
     this.vault = options.vault;
     this.fetchImpl = options.fetch ?? fetch;
     this.tokenEndpoint = options.tokenEndpoint ?? DEFAULT_OPENAI_TOKEN_ENDPOINT;
+    this.tokenParams = options.tokenParams;
+    this.issuer = options.issuer;
+    this.audience = options.audience;
+    this.jwksUrl = options.jwksUrl;
     this.now = options.now ?? Date.now;
     this.validateIdTokenImpl = options.validateIdToken ?? validateIdToken;
   }
@@ -48,6 +60,7 @@ export class OpenAIOAuthClient {
         grant_type: "refresh_token",
         client_id: this.clientId,
         refresh_token: input.refreshToken,
+        ...(this.tokenParams ?? {}),
       }),
     });
 
@@ -60,7 +73,11 @@ export class OpenAIOAuthClient {
     }
 
     const idTokenClaims = payload.id_token
-      ? await this.validateIdTokenImpl(payload.id_token, this.clientId)
+      ? await this.validateIdTokenImpl(payload.id_token, this.clientId, {
+        issuer: this.issuer,
+        audience: this.audience,
+        jwksUrl: this.jwksUrl,
+      })
       : undefined;
 
     const bundle: StoredTokenBundle = {
@@ -69,6 +86,7 @@ export class OpenAIOAuthClient {
       refreshToken: payload.refresh_token ?? input.refreshToken,
       idToken: payload.id_token,
       email: typeof idTokenClaims?.email === "string" ? idTokenClaims.email : undefined,
+      source: "oauth",
       expiresAt: new Date(this.now() + resolveExpiresIn(payload.expires_in) * 1000).toISOString(),
       invalid: false,
     };
@@ -90,6 +108,7 @@ export class OpenAIOAuthClient {
         code: input.code,
         code_verifier: input.codeVerifier,
         redirect_uri: input.redirectUri,
+        ...(this.tokenParams ?? {}),
       }),
     });
 
@@ -103,7 +122,11 @@ export class OpenAIOAuthClient {
     }
 
     const idTokenClaims = payload.id_token
-      ? await this.validateIdTokenImpl(payload.id_token, this.clientId)
+      ? await this.validateIdTokenImpl(payload.id_token, this.clientId, {
+        issuer: this.issuer,
+        audience: this.audience,
+        jwksUrl: this.jwksUrl,
+      })
       : undefined;
     const accountId =
       typeof idTokenClaims?.sub === "string"
@@ -122,6 +145,7 @@ export class OpenAIOAuthClient {
       refreshToken: payload.refresh_token,
       idToken: payload.id_token,
       email: typeof idTokenClaims?.email === "string" ? idTokenClaims.email : undefined,
+      source: "oauth",
       expiresAt: new Date(this.now() + resolveExpiresIn(payload.expires_in) * 1000).toISOString(),
       invalid: false,
     };
@@ -133,9 +157,12 @@ export class OpenAIOAuthClient {
 
 async function parseTokenResponse(response: Response): Promise<RefreshTokenResponse> {
   try {
-    return (await response.json()) as RefreshTokenResponse;
+    return (await response.clone().json()) as RefreshTokenResponse;
   } catch {
-    return {};
+    const text = await response.text().catch(() => "");
+    return text.trim()
+      ? { error: text.trim() }
+      : {};
   }
 }
 

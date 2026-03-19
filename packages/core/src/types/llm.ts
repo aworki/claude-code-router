@@ -19,6 +19,13 @@ export interface ProviderOAuthConfig {
   client_id?: string;
   redirect_uri?: string;
   scopes?: string[];
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  jwks_url?: string;
+  issuer?: string;
+  audience?: string;
+  authorize_params?: Record<string, string>;
+  token_params?: Record<string, string>;
 }
 
 export interface UrlCitation {

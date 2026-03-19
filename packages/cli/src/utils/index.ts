@@ -17,7 +17,7 @@ import { writeFileSync, existsSync, readFileSync, mkdirSync } from "fs";
 import { checkForUpdates, performUpdate } from "./update";
 import { version } from "../../package.json";
 import { spawn } from "child_process";
-import {cleanupPidFile, isServiceRunning} from "./processCheck";
+import { cleanupPidFile, getServiceInfo } from "./processCheck";
 
 // Function to interpolate environment variables in config values
 const interpolateEnvVars = (obj: any): any => {
@@ -184,8 +184,8 @@ export const initConfig = async () => {
 };
 
 export const run = async (args: string[] = []) => {
-  const isRunning = isServiceRunning()
-  if (isRunning) {
+  const serviceInfo = await getServiceInfo();
+  if (serviceInfo.running) {
     console.log('claude-code-router server is running');
     return;
   }

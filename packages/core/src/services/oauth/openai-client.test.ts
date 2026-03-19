@@ -43,9 +43,9 @@ test("refresh uses the current OpenID token endpoint default", async () => {
     refreshToken: "refresh-token",
   });
 
-  assert.equal(DEFAULT_OPENAI_TOKEN_ENDPOINT, "https://auth0.openai.com/oauth/token");
-  assert.equal(OPENAI_OIDC_ISSUER, "https://auth0.openai.com/");
-  assert.equal(seenUrl, "https://auth0.openai.com/oauth/token");
+  assert.equal(DEFAULT_OPENAI_TOKEN_ENDPOINT, "https://auth.openai.com/oauth/token");
+  assert.equal(OPENAI_OIDC_ISSUER, "https://auth.openai.com");
+  assert.equal(seenUrl, "https://auth.openai.com/oauth/token");
 });
 
 test("refresh replaces rotated tokens atomically", async () => {
@@ -150,4 +150,102 @@ test("invalid_grant from an old refresh token does not invalidate a newer rotate
   assert.deepEqual(invalidated, []);
   assert.equal(current.invalid, undefined);
   assert.equal(current.refreshToken, "rotated-refresh-token");
+});
+
+test("exchangeAuthorizationCode forwards token params and id token validation overrides", async () => {
+  let seenBody = "";
+  let seenValidationOptions: Record<string, string | undefined> | undefined;
+  const vault: TokenVault = {
+    async save() {},
+    async get() {
+      return null;
+    },
+    async list() {
+      return [];
+    },
+    async markInvalid() {
+      return false;
+    },
+  };
+
+  const client = new OpenAIOAuthClient({
+    clientId: "client-123",
+    vault,
+    tokenEndpoint: "https://auth.openai.com/oauth/token",
+    tokenParams: {
+      audience: "https://api.openai.com/v1",
+    },
+    issuer: "https://auth.openai.com",
+    audience: "https://api.openai.com/v1",
+    jwksUrl: "https://auth.openai.com/.well-known/jwks.json",
+    validateIdToken: async (_idToken, _clientId, options) => {
+      seenValidationOptions = options;
+      return {
+        sub: "acct_123",
+        email: "person@example.com",
+      };
+    },
+    fetch: async (_url, init) => {
+      seenBody = String(init?.body);
+      return new Response(
+        JSON.stringify({
+          access_token: "new-access-token",
+          refresh_token: "refresh-token",
+          id_token: "id-token",
+          expires_in: 3600,
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    },
+  });
+
+  await client.exchangeAuthorizationCode({
+    code: "auth-code",
+    codeVerifier: "pkce-verifier",
+    redirectUri: "http://localhost:3456/oauth/callback",
+  });
+
+  assert.match(seenBody, /audience=https%3A%2F%2Fapi\.openai\.com%2Fv1/);
+  assert.deepEqual(seenValidationOptions, {
+    issuer: "https://auth.openai.com",
+    audience: "https://api.openai.com/v1",
+    jwksUrl: "https://auth.openai.com/.well-known/jwks.json",
+  });
+});
+
+test("exchangeAuthorizationCode surfaces the token endpoint error body", async () => {
+  const vault: TokenVault = {
+    async save() {},
+    async get() {
+      return null;
+    },
+    async list() {
+      return [];
+    },
+    async markInvalid() {
+      return false;
+    },
+  };
+
+  const client = new OpenAIOAuthClient({
+    clientId: "client-123",
+    vault,
+    fetch: async () =>
+      new Response("invalid_client", {
+        status: 401,
+        headers: { "content-type": "text/plain" },
+      }),
+  });
+
+  await assert.rejects(
+    client.exchangeAuthorizationCode({
+      code: "auth-code",
+      codeVerifier: "pkce-verifier",
+      redirectUri: "http://localhost:1455/auth/callback",
+    }),
+    /invalid_client/,
+  );
 });

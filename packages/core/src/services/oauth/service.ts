@@ -6,6 +6,14 @@ import { normalizeOAuthProviderConfig } from "./config";
 import { createPkcePair } from "./pkce";
 import { assertAllowedLoopbackRedirect } from "./redirect";
 import { InMemoryOAuthSessionStore } from "./session-store";
+import {
+  buildOpenAICodexUserAgent,
+  extractChatGPTAccountIdFromToken,
+} from "./openai-codex";
+import {
+  selectCodexImportedAccountId,
+  syncCodexCliCredentialToVault,
+} from "./codex-cli-sync";
 import type {
   OAuthAuthorizationRequest,
   OAuthAuthorizationResult,
@@ -23,7 +31,20 @@ interface OAuthServiceDependencies {
     getValidAccessToken?: (accountId: string) => Promise<StoredTokenBundle | { accessToken: string } | null>;
   };
   openAIClientFactory?: (
-    clientId: string
+    provider: Partial<LLMProvider> & {
+      oauth: {
+        client_id: string;
+        redirect_uri: string;
+        scopes: string[];
+        authorization_endpoint?: string;
+        token_endpoint?: string;
+        jwks_url?: string;
+        issuer?: string;
+        audience?: string;
+        authorize_params?: Record<string, string>;
+        token_params?: Record<string, string>;
+      };
+    }
   ) => Pick<OpenAIOAuthClient, "refresh" | "exchangeAuthorizationCode">;
   sessionStore?: Pick<InMemoryOAuthSessionStore, "issue" | "consume">;
   logger?: {
@@ -52,9 +73,13 @@ export class OAuthService {
     this.now = deps.now ?? Date.now;
     this.sessionStore = deps.sessionStore ?? new InMemoryOAuthSessionStore({ now: this.now });
     this.stateFactory = deps.stateFactory ?? (() => randomBytes(32).toString("base64url"));
-    this.authorizeEndpoint = deps.authorizeEndpoint ?? "https://auth0.openai.com/authorize";
+    this.authorizeEndpoint = deps.authorizeEndpoint ?? "https://auth.openai.com/oauth/authorize";
     this.redirectAllowlist = deps.redirectAllowlist ?? [];
     this.defaultRedirectUri = deps.defaultRedirectUri;
+  }
+
+  async syncExternalCredentials() {
+    return syncCodexCliCredentialToVault(this.deps.vault);
   }
 
   async buildRequestAuth(provider: Partial<LLMProvider>): Promise<OAuthRequestAuth> {
@@ -68,11 +93,18 @@ export class OAuthService {
       };
     }
 
-    if (!normalizedProvider.account_id) {
+    const effectiveAccountId =
+      normalizedProvider.account_id ||
+      selectCodexImportedAccountId(await this.deps.vault.list());
+
+    if (!effectiveAccountId) {
       throw this.createReauthRequiredError();
     }
 
-    const token = await this.getValidAccessToken(normalizedProvider as Partial<LLMProvider> & { account_id: string });
+    const token = await this.getValidAccessToken({
+      ...normalizedProvider,
+      account_id: effectiveAccountId,
+    } as Partial<LLMProvider> & { account_id: string });
     if (!token?.accessToken) {
       throw this.createReauthRequiredError();
     }
@@ -80,6 +112,10 @@ export class OAuthService {
     return {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
+        "chatgpt-account-id":
+          extractChatGPTAccountIdFromToken(token.accessToken) ?? effectiveAccountId,
+        originator: "pi",
+        "User-Agent": buildOpenAICodexUserAgent(),
       },
     };
   }
@@ -97,7 +133,10 @@ export class OAuthService {
       redirectUri,
     });
 
-    const authorizationUrl = new URL(this.authorizeEndpoint);
+    const authorizationUrl = new URL(
+      normalizedProvider.oauth!.authorization_endpoint ?? this.authorizeEndpoint
+    );
+    const authorizeParams = normalizedProvider.oauth!.authorize_params ?? {};
     authorizationUrl.searchParams.set("response_type", "code");
     authorizationUrl.searchParams.set("client_id", normalizedProvider.oauth!.client_id!);
     authorizationUrl.searchParams.set("redirect_uri", redirectUri);
@@ -105,6 +144,9 @@ export class OAuthService {
     authorizationUrl.searchParams.set("state", state);
     authorizationUrl.searchParams.set("code_challenge", codeChallenge);
     authorizationUrl.searchParams.set("code_challenge_method", method);
+    for (const [key, value] of Object.entries(authorizeParams)) {
+      authorizationUrl.searchParams.set(key, value);
+    }
 
     return {
       authorizationUrl: authorizationUrl.toString(),
@@ -154,7 +196,7 @@ export class OAuthService {
     }
 
     const bundle = await this.getOpenAIClient(
-      normalizedProvider.oauth!.client_id!
+      normalizedProvider
     ).exchangeAuthorizationCode({
       code: input.code,
       codeVerifier: session.codeVerifier,
@@ -175,6 +217,7 @@ export class OAuthService {
         accountKey: createHash("sha256").update(bundle.accountId).digest("hex").slice(0, 12),
         accountHint: redactAccountId(bundle.accountId),
         emailHint: redactEmail(bundle.email),
+        ...(bundle.source ? { source: bundle.source } : {}),
         expiresAt: bundle.expiresAt,
         invalid: Boolean(bundle.invalid),
         reauthRequired: Boolean(bundle.invalid) || this.isExpired(bundle.expiresAt),
@@ -205,7 +248,7 @@ export class OAuthService {
     }
 
     try {
-      return await this.getOpenAIClient(provider.oauth?.client_id).refresh({
+      return await this.getOpenAIClient(this.requireOAuthProvider(provider)).refresh({
         accountId,
         refreshToken: token.refreshToken,
       });
@@ -243,6 +286,13 @@ export class OAuthService {
         client_id: string;
         redirect_uri: string;
         scopes: string[];
+        authorization_endpoint?: string;
+        token_endpoint?: string;
+        jwks_url?: string;
+        issuer?: string;
+        audience?: string;
+        authorize_params?: Record<string, string>;
+        token_params?: Record<string, string>;
       };
     };
   }
@@ -254,17 +304,36 @@ export class OAuthService {
     }
   }
 
-  private getOpenAIClient(clientId: string) {
+  private getOpenAIClient(provider: Partial<LLMProvider> & {
+    oauth: {
+      client_id: string;
+      redirect_uri: string;
+      scopes: string[];
+      authorization_endpoint?: string;
+      token_endpoint?: string;
+      jwks_url?: string;
+      issuer?: string;
+      audience?: string;
+      authorize_params?: Record<string, string>;
+      token_params?: Record<string, string>;
+    };
+  }) {
+    const clientId = provider.oauth.client_id;
     const cachedClient = this.openAIClients.get(clientId);
     if (cachedClient) {
       return cachedClient;
     }
 
     const client =
-      this.deps.openAIClientFactory?.(clientId) ??
+      this.deps.openAIClientFactory?.(provider) ??
       new OpenAIOAuthClient({
         clientId,
         vault: this.deps.vault,
+        tokenEndpoint: provider.oauth.token_endpoint,
+        tokenParams: provider.oauth.token_params,
+        issuer: provider.oauth.issuer,
+        audience: provider.oauth.audience,
+        jwksUrl: provider.oauth.jwks_url,
       });
 
     this.openAIClients.set(clientId, client);

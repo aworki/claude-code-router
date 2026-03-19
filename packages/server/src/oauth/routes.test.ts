@@ -9,6 +9,7 @@ function createTestApp(options?: {
   routeConfig?: any;
   authConfig?: any;
   vaultList?: Array<Record<string, unknown>>;
+  openAIClientFactory?: any;
 }) {
   const app = Fastify();
   const authConfig = options?.authConfig ?? {
@@ -43,7 +44,8 @@ function createTestApp(options?: {
         return false;
       },
     } as any,
-    defaultRedirectUri: `http://localhost:${effectivePort}/oauth/callback`,
+    defaultRedirectUri: `http://localhost:${effectivePort}/auth/callback`,
+    openAIClientFactory: options?.openAIClientFactory,
     stateFactory: (() => {
       let counter = 0;
       return () => `state-${++counter}`;
@@ -85,8 +87,11 @@ test("GET /oauth/login redirects to the OpenAI authorize URL and sets signed sta
     assert.ok(location);
 
     const authorizeUrl = new URL(location);
-    assert.equal(authorizeUrl.origin, "https://auth0.openai.com");
-    assert.equal(authorizeUrl.pathname, "/authorize");
+    assert.equal(authorizeUrl.origin, "https://auth.openai.com");
+    assert.equal(authorizeUrl.pathname, "/oauth/authorize");
+    assert.equal(authorizeUrl.searchParams.get("id_token_add_organizations"), "true");
+    assert.equal(authorizeUrl.searchParams.get("codex_cli_simplified_flow"), "true");
+    assert.equal(authorizeUrl.searchParams.get("originator"), "pi");
     assert.equal(authorizeUrl.searchParams.get("client_id"), "client-123");
     assert.equal(
       authorizeUrl.searchParams.get("redirect_uri"),
@@ -143,8 +148,114 @@ test("GET /oauth/login resolves providers from the real startup initialConfig sh
     const authorizeUrl = new URL(location);
     assert.equal(
       authorizeUrl.searchParams.get("redirect_uri"),
-      "http://localhost:4567/oauth/callback",
+      "http://localhost:4567/auth/callback",
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /auth/callback completes the same OAuth flow as /oauth/callback", async () => {
+  const app = createTestApp({
+    routeConfig: {
+      PORT: 1455,
+      OAUTH_COOKIE_SECRET: "signed-cookie-secret",
+      providers: [
+        {
+          name: "openai-oauth",
+          auth_strategy: "openai-oauth",
+          oauth: {
+            client_id: "client-123",
+            redirect_uri: "http://localhost:1455/auth/callback",
+            scopes: ["openid", "email", "offline_access"],
+          },
+        },
+      ],
+    },
+    openAIClientFactory() {
+      return {
+        async refresh() {
+          throw new Error("refresh should not be called");
+        },
+        async exchangeAuthorizationCode() {
+          return {
+            accountId: "acct_123",
+            email: "person@example.com",
+            expiresAt: "2026-03-20T00:00:00.000Z",
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const loginResponse = await app.inject({
+      method: "GET",
+      url: "/oauth/login",
+    });
+
+    const location = loginResponse.headers.location;
+    assert.ok(location);
+
+    const state = new URL(location).searchParams.get("state");
+    assert.ok(state);
+
+    const setCookieHeader = loginResponse.headers["set-cookie"];
+    const firstCookie = Array.isArray(setCookieHeader)
+      ? setCookieHeader[0]
+      : setCookieHeader;
+    assert.ok(firstCookie);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/auth/callback?code=auth-code&state=${encodeURIComponent(state)}`,
+      headers: {
+        cookie: firstCookie.split(";")[0]!,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /Authentication complete/i);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /oauth/login rejects ambiguous configs with multiple openai-oauth providers", async () => {
+  const app = createTestApp({
+    routeConfig: {
+      PORT: 3456,
+      OAUTH_COOKIE_SECRET: "signed-cookie-secret",
+      providers: [
+        {
+          name: "openai-oauth-a",
+          auth_strategy: "openai-oauth",
+          oauth: {
+            client_id: "client-a",
+            redirect_uri: "http://127.0.0.1:3456/oauth/callback",
+          },
+        },
+        {
+          name: "openai-oauth-b",
+          auth_strategy: "openai-oauth",
+          oauth: {
+            client_id: "client-b",
+            redirect_uri: "http://127.0.0.1:3456/oauth/callback",
+          },
+        },
+      ],
+    },
+  });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/oauth/login",
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.match(response.body, /only one openai-oauth provider/i);
+    assert.match(response.body, /account_id/i);
   } finally {
     await app.close();
   }
@@ -190,6 +301,81 @@ test("POST /oauth/complete rejects a callback URL whose redirect does not match 
   }
 });
 
+test("POST /oauth/complete returns the authorized account metadata", async () => {
+  const app = createTestApp({
+    routeConfig: {
+      PORT: 1455,
+      OAUTH_COOKIE_SECRET: "signed-cookie-secret",
+      providers: [
+        {
+          name: "openai-oauth",
+          auth_strategy: "openai-oauth",
+          oauth: {
+            client_id: "client-123",
+            redirect_uri: "http://localhost:1455/auth/callback",
+            scopes: ["openid", "email", "offline_access"],
+          },
+        },
+      ],
+    },
+    openAIClientFactory() {
+      return {
+        async refresh() {
+          throw new Error("refresh should not be called");
+        },
+        async exchangeAuthorizationCode() {
+          return {
+            accountId: "windowslive|ccda259a13fff370",
+            email: "person@example.com",
+            expiresAt: "2026-03-20T00:00:00.000Z",
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const loginResponse = await app.inject({
+      method: "GET",
+      url: "/oauth/login",
+    });
+
+    const location = loginResponse.headers.location;
+    assert.ok(location);
+
+    const state = new URL(location).searchParams.get("state");
+    assert.ok(state);
+
+    const setCookieHeader = loginResponse.headers["set-cookie"];
+    const firstCookie = Array.isArray(setCookieHeader)
+      ? setCookieHeader[0]
+      : setCookieHeader;
+    assert.ok(firstCookie);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/oauth/complete",
+      headers: {
+        "content-type": "application/json",
+        cookie: firstCookie.split(";")[0]!,
+      },
+      payload: {
+        callbackUrl: `http://localhost:1455/auth/callback?code=auth-code&state=${encodeURIComponent(state)}`,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(JSON.parse(response.body), {
+      success: true,
+      accountId: "windowslive|ccda259a13fff370",
+      email: "person@example.com",
+      expiresAt: "2026-03-20T00:00:00.000Z",
+    });
+  } finally {
+    await app.close();
+  }
+});
+
 test("GET /api/oauth/status returns only redacted account metadata", async () => {
   const app = createTestApp({
     vaultList: [
@@ -198,8 +384,9 @@ test("GET /api/oauth/status returns only redacted account metadata", async () =>
         accessToken: "secret-access",
         refreshToken: "secret-refresh",
         email: "person@example.com",
-        expiresAt: "2026-03-19T00:00:00.000Z",
+        expiresAt: "2026-03-20T00:00:00.000Z",
         invalid: false,
+        source: "codex-cli",
       },
     ],
   });
@@ -218,7 +405,8 @@ test("GET /api/oauth/status returns only redacted account metadata", async () =>
           accountKey: "e77b122d95cf",
           accountHint: "ac...89",
           emailHint: "p...n@e...e.com",
-          expiresAt: "2026-03-19T00:00:00.000Z",
+          source: "codex-cli",
+          expiresAt: "2026-03-20T00:00:00.000Z",
           invalid: false,
           reauthRequired: false,
         },

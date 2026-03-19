@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeOAuthProviderConfig } from "./config";
+import {
+  assertOpenAIOAuthProviderLimit,
+  assertSingleOpenAIOAuthProvider,
+  normalizeOAuthProviderConfig,
+  OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+} from "./config";
 
 test("normalizes openai-oauth provider defaults", () => {
   const provider = normalizeOAuthProviderConfig({
@@ -10,14 +15,16 @@ test("normalizes openai-oauth provider defaults", () => {
   } as any);
 
   assert.equal(provider.auth_strategy, "openai-oauth");
+  assert.equal((provider as any).api_base_url, "https://chatgpt.com/backend-api");
   assert.equal(provider.oauth?.client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
-  assert.equal(provider.oauth?.redirect_uri, "http://localhost:3456/oauth/callback");
+  assert.equal(provider.oauth?.redirect_uri, "http://localhost:1455/auth/callback");
   assert.deepEqual(provider.oauth?.scopes, [
     "openid",
     "email",
     "profile",
     "offline_access",
   ]);
+  assert.deepEqual((provider as any).transformer?.use, ["openai-codex-responses"]);
 });
 
 test("normalizes openai-oauth provider defaults with a runtime redirect override", () => {
@@ -28,9 +35,44 @@ test("normalizes openai-oauth provider defaults with a runtime redirect override
       models: ["gpt-5.4"],
     } as any,
     {
-      defaultRedirectUri: "http://localhost:4567/oauth/callback",
+      defaultRedirectUri: "http://localhost:4567/auth/callback",
     },
   );
 
-  assert.equal(provider.oauth?.redirect_uri, "http://localhost:4567/oauth/callback");
+  assert.equal(provider.oauth?.redirect_uri, "http://localhost:4567/auth/callback");
+});
+
+test("rejects multiple openai-oauth providers in one config", () => {
+  assert.throws(
+    () =>
+      assertSingleOpenAIOAuthProvider([
+        { name: "openai-oauth-a", auth_strategy: "openai-oauth" },
+        { name: "openai-oauth-b", auth_strategy: "openai-oauth" },
+      ]),
+    new RegExp(OPENAI_OAUTH_SINGLE_PROVIDER_ERROR),
+  );
+});
+
+test("allows updating an existing openai-oauth provider without tripping the single-provider guard", () => {
+  assert.doesNotThrow(() =>
+    assertOpenAIOAuthProviderLimit(
+      [
+        { name: "openai-oauth", auth_strategy: "openai-oauth" },
+        { name: "openai-api-key", auth_strategy: "api-key" },
+      ],
+      { name: "openai-oauth", auth_strategy: "openai-oauth" },
+      "openai-oauth",
+    ),
+  );
+});
+
+test("normalizes openai-oauth providers away from public OpenAI API base URLs", () => {
+  const provider = normalizeOAuthProviderConfig({
+    name: "openai-oauth",
+    auth_strategy: "openai-oauth",
+    api_base_url: "https://api.openai.com/v1/chat/completions",
+    models: ["gpt-5.4"],
+  } as any);
+
+  assert.equal((provider as any).api_base_url, "https://chatgpt.com/backend-api");
 });

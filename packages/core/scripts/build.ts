@@ -37,6 +37,7 @@ const baseConfig: esbuild.BuildOptions = {
     "tiktoken",
     "@CCR/shared",
     "lru-cache",
+    "argon2",
     "keytar",
   ],
 };

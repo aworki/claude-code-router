@@ -17,6 +17,8 @@
 
 > A powerful tool to route Claude Code requests to different models and customize any request.
 
+> This worktree currently carries a Codex-focused fork extension. In addition to the upstream router behavior, it can import Codex CLI OAuth credentials, complete the local OpenAI OAuth flow, and forward GPT-5.4 traffic through the Codex backend transport.
+
 ![](blog/images/claude-code.png)
 
 ## ✨ Features
@@ -26,7 +28,7 @@
 - **Request/Response Transformation**: Customize requests and responses for different providers using transformers.
 - **Dynamic Model Switching**: Switch models on-the-fly within Claude Code using the `/model` command.
 - **CLI Model Management**: Manage models and providers directly from the terminal with `ccr model`.
-- **OpenAI OAuth Support**: Authorize one or more OpenAI accounts and route `gpt-5.4` traffic without storing a raw OpenAI API key.
+- **Codex OAuth + GPT-5.4 Support**: Authorize one or more OpenAI accounts, import Codex CLI credentials, and route `gpt-5.4` traffic without storing a raw OpenAI API key.
 - **GitHub Actions Integration**: Trigger Claude Code tasks in your GitHub workflows.
 - **Plugin System**: Extend functionality with custom transformers.
 
@@ -89,19 +91,19 @@ This allows you to keep sensitive API keys in environment variables instead of h
 
 #### OpenAI OAuth Provider
 
-CCR also supports an `openai-oauth` provider for Codex/GPT-5.4 style routing. A minimal provider looks like this:
+This fork also supports an `openai-oauth` provider for Codex/GPT-5.4 style routing. A minimal provider looks like this:
 
 ```json
 {
   "name": "openai-oauth",
   "auth_strategy": "openai-oauth",
-  "account_id": "acct_12345678",
-  "api_base_url": "https://api.openai.com/v1/chat/completions",
+  "account_id": "",
+  "api_base_url": "https://chatgpt.com/backend-api/codex/responses",
   "api_key": "",
   "models": ["gpt-5.4"],
   "oauth": {
     "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-    "redirect_uri": "http://localhost:3456/oauth/callback",
+    "redirect_uri": "http://localhost:1455/auth/callback",
     "scopes": ["openid", "email", "profile", "offline_access"]
   }
 }
@@ -109,9 +111,11 @@ CCR also supports an `openai-oauth` provider for Codex/GPT-5.4 style routing. A 
 
 Notes:
 
-- `account_id` selects which authorized OpenAI account the provider should use. Leave it empty to use the most recently authorized account.
+- `account_id` selects which authorized OpenAI account the provider should use. Leave it empty to use the imported account automatically when there is only one valid OAuth bundle.
 - `api_key` should be empty for `openai-oauth` providers. CCR stores OAuth tokens in the local token vault instead.
-- `redirect_uri` should match the local CCR server callback path. The current default is `http://localhost:3456/oauth/callback`.
+- `redirect_uri` should match the local CCR server callback path. The current default is `http://localhost:1455/auth/callback`.
+- `api_base_url` is normalized to the Codex backend transport. Public OpenAI `chat/completions` URLs are not used for this provider.
+- On macOS, CCR can also import credentials from Codex CLI (`~/.codex/auth.json` or the `Codex Auth` keychain record), following the same account when possible.
 
 Here is a comprehensive example:
 
@@ -252,17 +256,18 @@ If you want to route through an OpenAI OAuth-backed provider, authorize an accou
 
 ```shell
 ccr oauth login
-ccr oauth complete "http://localhost:3456/oauth/callback?code=...&state=..."
+ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
 ccr oauth status
 ```
 
 - `ccr oauth login` starts the browser authorization flow.
 - `ccr oauth complete` is the CLI manual fallback that finishes the callback exchange with a pasted callback URL.
 - `ccr oauth status` shows redacted account metadata, expiry, and whether re-authentication is required.
+- After `ccr oauth complete`, CCR writes the resolved `account_id` back into the `openai-oauth` provider automatically.
 
 The Web UI also exposes an OpenAI OAuth login entry point and provider settings for `auth_strategy`, `account_id`, and `oauth.redirect_uri`.
 
-Open question before release: confirm the final OpenAI-required scopes and whether `codex_cli_simplified_flow=true` is supported in the upstream OAuth flow.
+If you need to inspect the final upstream payload, CCR writes a structured `final request` log entry to `~/.claude-code-router/logs/ccr-*.log`, including the transformed request body sent to `https://chatgpt.com/backend-api/codex/responses`.
 
 ### 4. UI Mode
 

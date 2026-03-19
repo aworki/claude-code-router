@@ -2,6 +2,8 @@ import cookie from "@fastify/cookie";
 import type { FastifyPluginAsync } from "fastify";
 
 export const OAUTH_STATE_COOKIE = "ccr_oauth_state";
+const OPENAI_OAUTH_SINGLE_PROVIDER_ERROR =
+  "Only one openai-oauth provider is supported at a time. Use account_id to bind different authorized OpenAI accounts.";
 
 interface OAuthProviderConfig {
   auth_strategy?: string;
@@ -26,7 +28,7 @@ interface OAuthRouteService {
     errorDescription?: string | null;
     stateCookieValue?: string;
     callbackUrl?: string;
-  }): Promise<unknown>;
+  }): Promise<Record<string, unknown>>;
   getStatus(): Promise<unknown>;
 }
 
@@ -71,7 +73,7 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
     }
   });
 
-  app.get("/oauth/callback", async (req, reply) => {
+  const handleOAuthCallback: FastifyPluginAsync<OAuthRoutesOptions> extends never ? never : any = async (req: any, reply: any) => {
     try {
       const provider = getConfiguredOAuthProvider(options.config);
       await options.oauthService.completeAuthorization({
@@ -94,19 +96,22 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
         .type("text/html; charset=utf-8")
         .send(renderCompletionPage(`Authentication failed: ${escapeHtml(toErrorMessage(error))}`));
     }
-  });
+  };
+
+  app.get("/oauth/callback", handleOAuthCallback);
+  app.get("/auth/callback", handleOAuthCallback);
 
   app.post("/oauth/complete", async (req, reply) => {
     try {
       const provider = getConfiguredOAuthProvider(options.config);
       const body = (req.body ?? {}) as { callbackUrl?: string };
-      await options.oauthService.completeAuthorization({
+      const completed = await options.oauthService.completeAuthorization({
         provider,
         callbackUrl: body.callbackUrl,
         stateCookieValue: readSignedStateCookie(req.cookies[OAUTH_STATE_COOKIE], req.unsignCookie.bind(req)),
       });
 
-      reply.clearCookie(OAUTH_STATE_COOKIE, { path: "/" }).send({ success: true });
+      reply.clearCookie(OAUTH_STATE_COOKIE, { path: "/" }).send({ success: true, ...completed });
     } catch (error) {
       reply.code(400).send({
         error: toErrorMessage(error),
@@ -128,7 +133,13 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
 function getConfiguredOAuthProvider(config: any): OAuthProviderConfig {
   const resolvedConfig = getOAuthConfigRoot(config);
   const providers = resolvedConfig.Providers || resolvedConfig.providers || [];
-  const provider = providers.find((candidate: OAuthProviderConfig) => candidate.auth_strategy === "openai-oauth");
+  const oauthProviders = providers.filter(
+    (candidate: OAuthProviderConfig) => candidate.auth_strategy === "openai-oauth",
+  );
+  if (oauthProviders.length > 1) {
+    throw new Error(OPENAI_OAUTH_SINGLE_PROVIDER_ERROR);
+  }
+  const provider = oauthProviders[0];
   if (!provider) {
     throw new Error("OpenAI OAuth provider is not configured");
   }

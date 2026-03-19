@@ -2,12 +2,44 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { PID_FILE, REFERENCE_COUNT_FILE } from '@CCR/shared';
 import { readConfigFile } from '.';
 import find from 'find-process';
-import { execSync } from 'child_process'; // 引入 execSync 来执行命令行
+import { execFileSync, execSync } from 'child_process'; // 引入 execSync 来执行命令行
+
+export async function isServiceReachable(
+    endpoint: string,
+    fetchImpl: typeof fetch = fetch
+): Promise<boolean> {
+    try {
+        const response = await fetchImpl(new URL('/health', endpoint).toString());
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+}
 
 export async function isProcessRunning(pid: number): Promise<boolean> {
     try {
         const processes = await find('pid', pid);
         return processes.length > 0;
+    } catch (error) {
+        return false;
+    }
+}
+
+export function isPortListening(
+    port: number,
+    execFileSyncImpl: typeof execFileSync = execFileSync,
+): boolean {
+    if (process.platform === 'win32') {
+        return false;
+    }
+
+    try {
+        const output = execFileSyncImpl(
+            'lsof',
+            ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'],
+            { encoding: 'utf8', stdio: 'pipe' },
+        );
+        return output.includes('LISTEN');
     } catch (error) {
         return false;
     }
@@ -120,16 +152,20 @@ export function getServicePid(): number | null {
 }
 
 export async function getServiceInfo() {
-    const pid = getServicePid();
-    const running = await isServiceRunning();
     const config = await readConfigFile();
     const port = config.PORT || 3456;
+    const endpoint = `http://127.0.0.1:${port}`;
+    const pid = getServicePid();
+    const pidRunning = pid ? await isProcessRunning(pid) : false;
+    const endpointRunning = await isServiceReachable(endpoint);
+    const portListening = isPortListening(port);
+    const running = pidRunning || endpointRunning || portListening;
 
     return {
         running,
-        pid,
+        pid: pidRunning ? pid : null,
         port,
-        endpoint: `http://127.0.0.1:${port}`,
+        endpoint,
         pidFile: PID_FILE,
         referenceCount: getReferenceCount()
     };

@@ -10,6 +10,13 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      argon2:
+        specifier: ^0.44.0
+        version: 0.44.0
+      keytar:
+        specifier: ^7.9.0
+        version: 7.9.0
     devDependencies:
       '@types/node':
         specifier: ^24.0.15

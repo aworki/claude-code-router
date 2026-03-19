@@ -85,15 +85,15 @@
     {
       "name": "openai-oauth",
       "auth_strategy": "openai-oauth",
-      "account_id": "acct_12345678",
-      "api_base_url": "https://api.openai.com/v1/chat/completions",
+      "account_id": "",
+      "api_base_url": "https://chatgpt.com/backend-api/codex/responses",
       "api_key": "",
       "models": [
         "gpt-5.4"
       ],
       "oauth": {
         "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-        "redirect_uri": "http://localhost:3456/oauth/callback",
+        "redirect_uri": "http://localhost:1455/auth/callback",
         "scopes": [
           "openid",
           "email",
