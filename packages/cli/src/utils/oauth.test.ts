@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  getOAuthCallbackListenerMessage,
+  getOAuthRedirectUriFromAuthorizationUrl,
   bindOAuthProviderAccount,
   captureOAuthLoginSession,
   extractOAuthStateCookie,
@@ -13,6 +16,7 @@ import {
   loadOAuthLoginCookie,
   postOAuthComplete,
   storeOAuthLoginCookie,
+  waitForOAuthCallback,
 } from "./oauth";
 
 test("status formatter renders redacted oauth account metadata", () => {
@@ -49,6 +53,48 @@ test("oauth login guidance tells the user to complete manually", () => {
 
   assert.match(guidance, /copy the callback URL/i);
   assert.match(guidance, /ccr oauth complete/i);
+});
+
+test("extracts redirect uri from the authorization url", () => {
+  assert.equal(
+    getOAuthRedirectUriFromAuthorizationUrl(
+      "https://auth.openai.com/oauth/authorize?client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=state-1",
+    ),
+    "http://localhost:1455/auth/callback",
+  );
+});
+
+test("oauth callback listener message points to the local redirect uri", () => {
+  assert.match(
+    getOAuthCallbackListenerMessage("http://localhost:1455/auth/callback"),
+    /1455\/auth\/callback/,
+  );
+});
+
+test("waits for the oauth callback on the configured loopback redirect uri", async () => {
+  const server = http.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+    server.once("error", reject);
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const redirectUri = `http://127.0.0.1:${address.port}/auth/callback`;
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+
+  const callbackPromise = waitForOAuthCallback(redirectUri, {
+    timeoutMs: 5_000,
+  });
+
+  const response = await fetch(`${redirectUri}?code=code-1&state=state-1`);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /Authentication received/i);
+
+  assert.equal(
+    await callbackPromise,
+    `${redirectUri}?code=code-1&state=state-1`,
+  );
 });
 
 test("captures and persists the signed oauth login cookie", async () => {

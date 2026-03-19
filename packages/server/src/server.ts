@@ -29,7 +29,6 @@ import { registerOAuthRoutes } from "./oauth/routes";
 export const createServer = async (config: any): Promise<any> => {
   const server = new Server(config);
   const app = server.app;
-  const oauthRouteConfig = (server as any).configService?.getAll?.() ?? config.initialConfig ?? config;
 
   app.register(fastifyMultipart, {
     limits: {
@@ -38,7 +37,7 @@ export const createServer = async (config: any): Promise<any> => {
   });
 
   await app.register(registerOAuthRoutes, {
-    config: oauthRouteConfig,
+    config: () => (server as any).configService?.getAll?.() ?? config.initialConfig ?? config,
     oauthService: (server as any).oauthService,
   });
 

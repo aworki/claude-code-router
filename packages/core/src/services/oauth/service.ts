@@ -54,7 +54,6 @@ interface OAuthServiceDependencies {
   stateFactory?: () => string;
   authorizeEndpoint?: string;
   redirectAllowlist?: readonly string[];
-  defaultRedirectUri?: string;
 }
 
 export class OAuthService {
@@ -67,7 +66,6 @@ export class OAuthService {
   private readonly stateFactory: () => string;
   private readonly authorizeEndpoint: string;
   private readonly redirectAllowlist: readonly string[];
-  private readonly defaultRedirectUri?: string;
 
   constructor(private readonly deps: OAuthServiceDependencies) {
     this.now = deps.now ?? Date.now;
@@ -75,7 +73,6 @@ export class OAuthService {
     this.stateFactory = deps.stateFactory ?? (() => randomBytes(32).toString("base64url"));
     this.authorizeEndpoint = deps.authorizeEndpoint ?? "https://auth.openai.com/oauth/authorize";
     this.redirectAllowlist = deps.redirectAllowlist ?? [];
-    this.defaultRedirectUri = deps.defaultRedirectUri;
   }
 
   async syncExternalCredentials() {
@@ -274,9 +271,7 @@ export class OAuthService {
   }
 
   private requireOAuthProvider(provider: Partial<LLMProvider>) {
-    const normalizedProvider = normalizeOAuthProviderConfig(provider as any, {
-      defaultRedirectUri: this.defaultRedirectUri,
-    }) as Partial<LLMProvider>;
+    const normalizedProvider = normalizeOAuthProviderConfig(provider as any) as Partial<LLMProvider>;
     if (normalizedProvider.auth_strategy !== "openai-oauth" || !normalizedProvider.oauth?.client_id || !normalizedProvider.oauth.redirect_uri) {
       throw new Error("OpenAI OAuth provider is not configured");
     }

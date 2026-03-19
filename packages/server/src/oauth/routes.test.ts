@@ -6,7 +6,7 @@ import { apiKeyAuth } from "../middleware/auth";
 import { registerOAuthRoutes } from "./routes";
 
 function createTestApp(options?: {
-  routeConfig?: any;
+  routeConfig?: any | (() => any);
   authConfig?: any;
   vaultList?: Array<Record<string, unknown>>;
   openAIClientFactory?: any;
@@ -29,7 +29,8 @@ function createTestApp(options?: {
     ],
   };
   const routeConfig = options?.routeConfig ?? authConfig;
-  const effectivePort = routeConfig?.initialConfig?.PORT ?? routeConfig?.PORT ?? 3456;
+  const resolvedRouteConfig = typeof routeConfig === "function" ? routeConfig() : routeConfig;
+  const effectivePort = resolvedRouteConfig?.initialConfig?.PORT ?? resolvedRouteConfig?.PORT ?? 3456;
 
   const oauthService = new OAuthService({
     vault: {
@@ -111,7 +112,7 @@ test("GET /oauth/login redirects to the OpenAI authorize URL and sets signed sta
   }
 });
 
-test("GET /oauth/login resolves providers from the real startup initialConfig shape and uses the actual server port by default", async () => {
+test("GET /oauth/login resolves providers from the real startup initialConfig shape and preserves the registered default callback", async () => {
   const app = createTestApp({
     authConfig: {
       APIKEY: "test-api-key",
@@ -148,7 +149,55 @@ test("GET /oauth/login resolves providers from the real startup initialConfig sh
     const authorizeUrl = new URL(location);
     assert.equal(
       authorizeUrl.searchParams.get("redirect_uri"),
-      "http://localhost:4567/auth/callback",
+      "http://localhost:1455/auth/callback",
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /oauth/login resolves providers from live config after first-run bootstrap", async () => {
+  const liveConfig = {
+    initialConfig: {
+      PORT: 3456,
+      OAUTH_COOKIE_SECRET: "signed-cookie-secret",
+      providers: [],
+    },
+  };
+  const app = createTestApp({
+    authConfig: {
+      APIKEY: "test-api-key",
+      PORT: 3456,
+      providers: [],
+    },
+    routeConfig: () => liveConfig,
+  });
+
+  liveConfig.initialConfig.providers = [
+    {
+      name: "openai-oauth",
+      auth_strategy: "openai-oauth",
+      oauth: {
+        client_id: "client-123",
+        redirect_uri: "http://localhost:1455/auth/callback",
+      },
+    },
+  ];
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/oauth/login",
+    });
+
+    assert.equal(response.statusCode, 302);
+    const location = response.headers.location;
+    assert.ok(location);
+
+    const authorizeUrl = new URL(location);
+    assert.equal(
+      authorizeUrl.searchParams.get("redirect_uri"),
+      "http://localhost:1455/auth/callback",
     );
   } finally {
     await app.close();

@@ -97,7 +97,7 @@ export interface UnifiedTool {
   };
 }
 
-export type ThinkLevel = "none" | "low" | "medium" | "high";
+export type ThinkLevel = "none" | "low" | "medium" | "high" | "xhigh";
 
 // 统一的请求接口
 export interface UnifiedChatRequest {

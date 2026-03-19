@@ -1,3 +1,4 @@
+import http from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import path from "node:path";
@@ -31,6 +32,10 @@ export interface OAuthCompleteResponse {
   expiresAt?: string;
 }
 
+export interface OAuthCallbackWaitOptions {
+  timeoutMs?: number;
+}
+
 export function getOAuthLoginUrl(baseUrl: string) {
   return new URL("/oauth/login", baseUrl).toString();
 }
@@ -41,6 +46,10 @@ export function getOAuthCompleteUrl(baseUrl: string) {
 
 export function getOAuthStatusUrl(baseUrl: string) {
   return new URL("/api/oauth/status", baseUrl).toString();
+}
+
+export function getOAuthRedirectUriFromAuthorizationUrl(authorizationUrl: string) {
+  return new URL(authorizationUrl).searchParams.get("redirect_uri");
 }
 
 function getOAuthLoginCookiePath(options?: OAuthStorageOptions) {
@@ -217,6 +226,56 @@ export function getOAuthLoginGuidance() {
   ].join("\n");
 }
 
+export function getOAuthCallbackListenerMessage(redirectUri: string) {
+  return `Waiting for OAuth callback on ${redirectUri}`;
+}
+
+export async function waitForOAuthCallback(
+  redirectUri: string,
+  options: OAuthCallbackWaitOptions = {},
+) {
+  const redirectUrl = new URL(redirectUri);
+  const timeoutMs = options.timeoutMs ?? 180_000;
+
+  return await new Promise<string>((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", redirectUrl);
+      if (requestUrl.pathname !== redirectUrl.pathname) {
+        res.statusCode = 404;
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end("Not found");
+        return;
+      }
+
+      const callbackUrl = new URL(redirectUri);
+      callbackUrl.search = requestUrl.search;
+
+      res.statusCode = 200;
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.end(renderOAuthCallbackPage("Authentication received. Finishing authorization in Claude Code Router..."));
+      cleanup();
+      resolve(callbackUrl.toString());
+    });
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for OAuth callback on ${redirectUri}`));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      server.close(() => {});
+    };
+
+    server.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+
+    server.listen(Number(redirectUrl.port), redirectUrl.hostname);
+  });
+}
+
 export function openExternalUrl(url: string) {
   const escapedUrl = url.replace(/"/g, '\\"');
   let command = "";
@@ -239,4 +298,17 @@ export function openExternalUrl(url: string) {
       resolve();
     });
   });
+}
+
+function renderOAuthCallbackPage(message: string) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OAuth Callback</title>
+  </head>
+  <body>
+    <p>${message}</p>
+  </body>
+</html>`;
 }

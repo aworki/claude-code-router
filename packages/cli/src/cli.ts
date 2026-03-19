@@ -6,10 +6,13 @@ import {
   bindOAuthProviderAccount,
   captureOAuthLoginSession,
   fetchOAuthStatus,
+  getOAuthCallbackListenerMessage,
   formatOAuthAccounts,
+  getOAuthRedirectUriFromAuthorizationUrl,
   getOAuthLoginGuidance,
   openExternalUrl,
   postOAuthComplete,
+  waitForOAuthCallback,
 } from "./utils/oauth";
 import {
   cleanupPidFile,
@@ -142,8 +145,42 @@ async function handleOAuthCommand(args: string[]) {
       await startServiceIfNeeded();
       const serviceInfo = await getServiceInfo();
       const authorizationUrl = await captureOAuthLoginSession(serviceInfo.endpoint);
+      const redirectUri = getOAuthRedirectUriFromAuthorizationUrl(authorizationUrl);
+
+      if (!redirectUri) {
+        await openExternalUrl(authorizationUrl);
+        console.log(getOAuthLoginGuidance());
+        break;
+      }
+
+      let callbackPromise: Promise<string> | null = null;
+      try {
+        callbackPromise = waitForOAuthCallback(redirectUri);
+        console.log(getOAuthCallbackListenerMessage(redirectUri));
+      } catch (error) {
+        callbackPromise = null;
+        console.warn(`Automatic OAuth callback capture is unavailable: ${(error as Error).message}`);
+      }
+
       await openExternalUrl(authorizationUrl);
-      console.log(getOAuthLoginGuidance());
+
+      if (!callbackPromise) {
+        console.log(getOAuthLoginGuidance());
+        break;
+      }
+
+      try {
+        const callbackUrl = await callbackPromise;
+        const result = await postOAuthComplete(serviceInfo.endpoint, callbackUrl);
+        if (typeof result?.accountId === "string" && result.accountId) {
+          const config = await readConfigFile();
+          await writeConfigFile(bindOAuthProviderAccount(config, result.accountId));
+        }
+        console.log("OAuth completed successfully.");
+      } catch (error) {
+        console.warn(`Automatic OAuth completion failed: ${(error as Error).message}`);
+        console.log(getOAuthLoginGuidance());
+      }
       break;
     }
     case "complete": {

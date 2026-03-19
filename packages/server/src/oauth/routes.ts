@@ -33,13 +33,13 @@ interface OAuthRouteService {
 }
 
 interface OAuthRoutesOptions {
-  config: any;
+  config: any | (() => any);
   oauthService: OAuthRouteService;
   cookieSecret?: string;
 }
 
 export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async (app, options) => {
-  const resolvedConfig = getOAuthConfigRoot(options.config);
+  const resolvedConfig = getOAuthConfigRoot(resolveConfig(options.config));
   const cookieSecret =
     options.cookieSecret ??
     resolvedConfig.OAUTH_COOKIE_SECRET;
@@ -54,7 +54,7 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
 
   app.get("/oauth/login", async (_req, reply) => {
     try {
-      const provider = getConfiguredOAuthProvider(options.config);
+      const provider = getConfiguredOAuthProvider(resolveConfig(options.config));
       const started = await options.oauthService.beginAuthorization(provider);
 
       reply
@@ -75,7 +75,7 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
 
   const handleOAuthCallback: FastifyPluginAsync<OAuthRoutesOptions> extends never ? never : any = async (req: any, reply: any) => {
     try {
-      const provider = getConfiguredOAuthProvider(options.config);
+      const provider = getConfiguredOAuthProvider(resolveConfig(options.config));
       await options.oauthService.completeAuthorization({
         provider,
         state: (req.query as Record<string, string | undefined>).state,
@@ -103,7 +103,7 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
 
   app.post("/oauth/complete", async (req, reply) => {
     try {
-      const provider = getConfiguredOAuthProvider(options.config);
+      const provider = getConfiguredOAuthProvider(resolveConfig(options.config));
       const body = (req.body ?? {}) as { callbackUrl?: string };
       const completed = await options.oauthService.completeAuthorization({
         provider,
@@ -129,6 +129,10 @@ export const registerOAuthRoutes: FastifyPluginAsync<OAuthRoutesOptions> = async
     }
   });
 };
+
+function resolveConfig(config: OAuthRoutesOptions["config"]) {
+  return typeof config === "function" ? config() : config;
+}
 
 function getConfiguredOAuthProvider(config: any): OAuthProviderConfig {
   const resolvedConfig = getOAuthConfigRoot(config);

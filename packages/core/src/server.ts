@@ -38,7 +38,10 @@ import { TokenizerService } from "./services/tokenizer";
 import { router, calculateTokenCount, searchProjectBySession } from "./utils/router";
 import { sessionUsageCache } from "./utils/cache";
 import { OAuthService } from "./services/oauth/service";
-import { normalizeOAuthProviderConfig } from "./services/oauth/config";
+import {
+  getAutoBootstrappedOpenAIOAuthConfig,
+  normalizeOAuthProviderConfig,
+} from "./services/oauth/config";
 import { createTokenVault } from "./services/oauth/token-vault";
 
 // Extend FastifyRequest to include custom properties
@@ -106,10 +109,6 @@ class Server {
     this.oauthService = new OAuthService({
       vault: oauthVault,
       logger: this.app.log,
-      defaultRedirectUri: buildDefaultOAuthRedirectUri(
-        this.configService.get("HOST"),
-        this.configService.get("PORT"),
-      ),
     });
     this.transformerService = new TransformerService(
       this.configService,
@@ -230,9 +229,36 @@ class Server {
 
   async start(): Promise<void> {
     try {
-      await this.oauthService.syncExternalCredentials().catch((error) => {
+      const importedCredential = await this.oauthService.syncExternalCredentials().catch((error) => {
         this.app.log.warn({ error }, "Failed to sync Codex CLI credential");
+        return null;
       });
+
+      const bootstrapConfig = getAutoBootstrappedOpenAIOAuthConfig(
+        this.configService.getAll(),
+        {
+          hasImportedCredential: Boolean(importedCredential),
+        },
+      );
+      if (bootstrapConfig) {
+        this.configService.set("providers", bootstrapConfig.providers);
+        this.configService.set("Providers", bootstrapConfig.providers);
+        this.configService.set("Router", bootstrapConfig.Router);
+        this.providerService = new ProviderService(
+          this.configService,
+          this.transformerService,
+          this.app.log,
+        );
+        this.app.log.info(
+          {
+            model: bootstrapConfig.Router.default,
+            importedCredential: Boolean(importedCredential),
+          },
+          importedCredential
+            ? "Bootstrapped default openai-oauth config from imported Codex CLI credentials"
+            : "Bootstrapped default openai-oauth config for first-run onboarding",
+        );
+      }
 
       this.app._server = this;
 
@@ -327,13 +353,8 @@ function normalizeServerInitialConfig(initialConfig: AppConfig | undefined, inst
     };
   }
 
-  const defaultRedirectUri = buildDefaultOAuthRedirectUri(initialConfig.HOST, initialConfig.PORT);
   const normalizeProviderList = (providers: any[] | undefined) =>
-    providers?.map((provider) =>
-      normalizeOAuthProviderConfig(provider, {
-        defaultRedirectUri,
-      }),
-    );
+    providers?.map((provider) => normalizeOAuthProviderConfig(provider));
 
   return {
     ...initialConfig,
@@ -348,25 +369,6 @@ function normalizeServerInitialConfig(initialConfig: AppConfig | undefined, inst
       process.env.OAUTH_COOKIE_SECRET ??
       installationSecret,
   };
-}
-
-function buildDefaultOAuthRedirectUri(host: string | undefined, port: string | number | undefined) {
-  const normalizedPort = port ?? 3456;
-  const normalizedHost = normalizeOAuthRedirectHost(host);
-  return `http://${normalizedHost}:${normalizedPort}/auth/callback`;
-}
-
-function normalizeOAuthRedirectHost(host: string | undefined) {
-  const normalizedHost = host?.trim().toLowerCase();
-  if (!normalizedHost || normalizedHost === "0.0.0.0" || normalizedHost === "::" || normalizedHost === "[::]") {
-    return "localhost";
-  }
-
-  if (normalizedHost === "127.0.0.1" || normalizedHost === "localhost" || normalizedHost === "::1" || normalizedHost === "[::1]") {
-    return normalizedHost;
-  }
-
-  return "localhost";
 }
 
 // Export for external use

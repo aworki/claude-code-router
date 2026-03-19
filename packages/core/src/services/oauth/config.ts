@@ -4,7 +4,9 @@ export interface OAuthProviderConfig {
   name?: string;
   auth_strategy?: "api-key" | "openai-oauth";
   api_base_url?: string;
+  api_key?: string;
   account_id?: string;
+  models?: string[];
   transformer?: {
     use?: any[];
     [key: string]: any;
@@ -32,8 +34,48 @@ const DEFAULT_AUTHORIZE_PARAMS = {
   originator: "pi",
 };
 
+const DEFAULT_BOOTSTRAP_PROVIDER_NAME = "openai-oauth";
+const DEFAULT_BOOTSTRAP_MODEL = "gpt-5.4";
+
 export const OPENAI_OAUTH_SINGLE_PROVIDER_ERROR =
   "Only one openai-oauth provider is supported at a time. Use account_id to bind different authorized OpenAI accounts.";
+export function getAutoBootstrappedOpenAIOAuthConfig(
+  config: {
+    providers?: OAuthProviderConfig[];
+    Providers?: OAuthProviderConfig[];
+    Router?: Record<string, any>;
+  },
+  options: { hasImportedCredential: boolean; defaultRedirectUri?: string },
+) {
+  const existingProviders = config.providers ?? config.Providers ?? [];
+  if (Array.isArray(existingProviders) && existingProviders.length > 0) {
+    return null;
+  }
+
+  const existingRouter = config.Router ?? {};
+  if (existingRouter.default) {
+    return null;
+  }
+
+  const provider = normalizeOAuthProviderConfig(
+    {
+      name: DEFAULT_BOOTSTRAP_PROVIDER_NAME,
+      auth_strategy: "openai-oauth",
+      api_base_url: normalizeOpenAICodexBaseUrl(undefined),
+      api_key: "",
+      account_id: "",
+      models: [DEFAULT_BOOTSTRAP_MODEL],
+    },
+  );
+
+  return {
+    providers: [provider],
+    Router: {
+      ...existingRouter,
+      default: `${DEFAULT_BOOTSTRAP_PROVIDER_NAME},${DEFAULT_BOOTSTRAP_MODEL}`,
+    },
+  };
+}
 
 export function normalizeOAuthProviderConfig(
   provider: OAuthProviderConfig,

@@ -345,7 +345,7 @@ test("beginAuthorization issues an OpenAI authorize URL and completes with a one
   );
 });
 
-test("beginAuthorization uses the runtime default redirect URI when the provider does not override it", async () => {
+test("beginAuthorization keeps the registered OpenAI redirect URI when the provider does not override it", async () => {
   const service = new OAuthService({
     vault: {
       async save() {},
@@ -373,7 +373,7 @@ test("beginAuthorization uses the runtime default redirect URI when the provider
   const authorizeUrl = new URL(started.authorizationUrl);
   assert.equal(
     authorizeUrl.searchParams.get("redirect_uri"),
-    "http://localhost:4567/oauth/callback",
+    "http://localhost:1455/auth/callback",
   );
 });
 
