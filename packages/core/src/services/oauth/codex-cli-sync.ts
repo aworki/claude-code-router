@@ -41,10 +41,6 @@ export function readCodexCliCredential(
 
 export function selectCodexImportedAccountId(bundles: StoredTokenBundle[]) {
   const validBundles = bundles.filter((bundle) => !bundle.invalid);
-  if (validBundles.length !== 1) {
-    return null;
-  }
-
   return validBundles[0]?.accountId ?? null;
 }
 

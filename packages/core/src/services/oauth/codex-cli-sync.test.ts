@@ -81,7 +81,7 @@ test("selects the imported account id when there is exactly one valid bundle", (
   assert.equal(accountId, "windowslive|acct_123");
 });
 
-test("does not auto-select an account when multiple valid bundles exist", () => {
+test("selects the first valid account when multiple valid bundles exist", () => {
   const bundles: StoredTokenBundle[] = [
     {
       accountId: "windowslive|acct_123",
@@ -99,7 +99,7 @@ test("does not auto-select an account when multiple valid bundles exist", () => 
     },
   ];
 
-  assert.equal(selectCodexImportedAccountId(bundles), null);
+  assert.equal(selectCodexImportedAccountId(bundles), "windowslive|acct_123");
 });
 
 function createJwt(payload: Record<string, unknown>) {

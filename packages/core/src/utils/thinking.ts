@@ -1,8 +1,12 @@
 import { ThinkLevel } from "@/types/llm";
 
 export function getThinkLevel(
-  effort?: string
+  effort?: string | number
 ): ThinkLevel | undefined {
+  if (typeof effort === "number") {
+    return effort > 32768 ? "xhigh" : "high";
+  }
+
   switch (effort) {
     case "low":
       return "low";
@@ -16,4 +20,3 @@ export function getThinkLevel(
       return "medium";
   }
 }
-

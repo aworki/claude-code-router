@@ -96,6 +96,47 @@ test("buildRequestAuth falls back to the single imported oauth account when acco
   assert.equal(auth.headers.originator, "pi");
 });
 
+test("buildRequestAuth falls back to the first imported oauth account when multiple accounts exist", async () => {
+  const service = new OAuthService({
+    vault: {
+      async list() {
+        return [
+          {
+            accountId: "windowslive|acct_123",
+            accessToken: "oauth-access-token",
+            refreshToken: "refresh-token",
+            expiresAt: "2026-03-20T00:00:00.000Z",
+            invalid: false,
+          },
+          {
+            accountId: "windowslive|acct_456",
+            accessToken: "oauth-access-token-2",
+            refreshToken: "refresh-token-2",
+            expiresAt: "2026-03-21T00:00:00.000Z",
+            invalid: false,
+          },
+        ];
+      },
+      async getValidAccessToken(accountId: string) {
+        assert.equal(accountId, "windowslive|acct_123");
+        return { accessToken: createTokenWithAccountId("windowslive|acct_123") };
+      },
+    } as any,
+  });
+
+  const auth = await service.buildRequestAuth({
+    name: "openai-oauth",
+    auth_strategy: "openai-oauth",
+  } as any);
+
+  assert.equal(
+    auth.headers.Authorization,
+    `Bearer ${createTokenWithAccountId("windowslive|acct_123")}`,
+  );
+  assert.equal(auth.headers["chatgpt-account-id"], "windowslive|acct_123");
+  assert.equal(auth.headers.originator, "pi");
+});
+
 test("buildRequestAuth falls back to API key for non-oauth providers", async () => {
   const service = new OAuthService({
     vault: {} as any,

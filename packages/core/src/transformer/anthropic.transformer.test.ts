@@ -41,3 +41,26 @@ test("anthropic transformer maps large thinking budgets to xhigh reasoning effor
     },
   ]);
 });
+
+test("anthropic transformer does not crash when output_config is set without thinking", async () => {
+  const transformer = new AnthropicTransformer();
+
+  const transformed = await transformer.transformRequestOut!({
+    model: "claude-sonnet",
+    max_tokens: 4096,
+    messages: [
+      {
+        role: "user",
+        content: "Reply with OK",
+      },
+    ],
+    output_config: {
+      effort: "medium",
+    },
+  } as any);
+
+  assert.deepEqual((transformed as any).reasoning, {
+    effort: "medium",
+    enabled: false,
+  });
+});
