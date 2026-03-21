@@ -21,6 +21,7 @@ import {
 import { runModelSelector } from "./utils/modelSelector";
 import { activateCommand } from "./utils/activateCommand";
 import { readConfigFile, writeConfigFile } from "./utils";
+import { runSwitchCommand } from "./utils/switch";
 import { version } from "../package.json";
 import { spawn, exec } from "child_process";
 import {getPresetDir, loadConfigFromManifest, PID_FILE, readPresetFile, REFERENCE_COUNT_FILE} from "@CCR/shared";
@@ -42,6 +43,7 @@ const KNOWN_COMMANDS = [
   "statusline",
   "code",
   "model",
+  "switch",
   "oauth",
   "preset",
   "install",
@@ -65,6 +67,7 @@ Commands:
   statusline    Integrated statusline
   code          Execute claude command
   model         Interactive model selection and configuration
+  switch        Switch the active provider or OAuth account
   oauth         Manage OpenAI OAuth login and status
   preset        Manage presets (export, install, list, delete)
   install       Install preset from GitHub marketplace
@@ -81,6 +84,7 @@ Examples:
   ccr code "Write a Hello World"
   ccr my-preset "Write a Hello World"    # Use preset configuration
   ccr model
+  ccr switch
   ccr preset export my-config            # Export current config as preset
   ccr preset install /path/to/preset     # Install a preset from directory
   ccr preset list                        # List all presets
@@ -403,6 +407,23 @@ async function main() {
     case "model":
       await runModelSelector();
       break;
+    case "switch": {
+      const target = process.argv[3];
+      const result = await runSwitchCommand(target);
+      if (isRunning) {
+        await restartService();
+        await startServiceIfNeeded();
+      }
+
+      if (result.selection.kind === "provider") {
+        console.log(`Switched to provider: ${result.selection.providerName}`);
+      } else {
+        console.log(
+          `Switched ${result.selection.providerName} to account: ${result.selection.accountId}`,
+        );
+      }
+      break;
+    }
     case "oauth":
       await handleOAuthCommand(process.argv.slice(3));
       break;
