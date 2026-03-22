@@ -43,6 +43,7 @@ import {
   normalizeOAuthProviderConfig,
 } from "./services/oauth/config";
 import { createTokenVault } from "./services/oauth/token-vault";
+import { normalizeMessagesRequestBody } from "./utils/request-normalization";
 
 // Extend FastifyRequest to include custom properties
 declare module "fastify" {
@@ -265,11 +266,9 @@ class Server {
       this.app.addHook("preHandler", (req, reply, done) => {
         const url = new URL(`http://127.0.0.1${req.url}`);
         if (url.pathname.endsWith("/v1/messages") && req.body) {
-          const body = req.body as any;
+          const body = normalizeMessagesRequestBody(req.body as any);
+          req.body = body;
           req.log.info({ data: body, type: "request body" });
-          if (!body.stream) {
-            body.stream = false;
-          }
         }
         done();
       });

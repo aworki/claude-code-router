@@ -156,12 +156,121 @@ test("loadLocalOAuthAccounts decrypts local vault records and returns full accou
   const accounts = await loadLocalOAuthAccounts({
     rootDir,
     codexAuthFile: path.join(rootDir, "missing-codex-auth.json"),
+    codexRegistryFile: path.join(rootDir, "missing-registry.json"),
   });
 
   assert.equal(accounts.length, 1);
   assert.equal(accounts[0]?.accountId, bundle.accountId);
   assert.equal(accounts[0]?.email, bundle.email);
   assert.equal(accounts[0]?.source, "oauth");
+});
+
+test("loadLocalOAuthAccounts reads the active codex-auth account from registry.json", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "ccr-switch-"));
+  const codexDir = await mkdtemp(path.join(os.tmpdir(), "ccr-codex-auth-"));
+  const accountsDir = path.join(codexDir, "accounts");
+  const accessToken = createJwt({
+    exp: Math.floor(Date.parse("2026-03-30T06:56:06.000Z") / 1000),
+    email: "active@example.com",
+  });
+
+  await mkdir(rootDir, { recursive: true });
+  await mkdir(accountsDir, { recursive: true });
+  await writeFile(
+    path.join(accountsDir, "registry.json"),
+    JSON.stringify({
+      active_account_key: "user-active::acct-active",
+    }),
+  );
+  await writeFile(
+    path.join(accountsDir, "dXNlci1hY3RpdmU6OmFjY3QtYWN0aXZl.auth.json"),
+    JSON.stringify({
+      tokens: {
+        access_token: accessToken,
+        refresh_token: "refresh-token",
+        account_id: "acct-active",
+      },
+      last_refresh: "2026-03-21T01:02:03.000Z",
+    }),
+  );
+
+  const accounts = await loadLocalOAuthAccounts({
+    rootDir,
+    codexAuthFile: path.join(codexDir, "auth.json"),
+    codexRegistryFile: path.join(accountsDir, "registry.json"),
+  });
+
+  assert.equal(accounts.length, 1);
+  assert.equal(accounts[0]?.accountId, "acct-active");
+  assert.equal(accounts[0]?.email, "active@example.com");
+  assert.equal(accounts[0]?.source, "codex-cli");
+});
+
+test("loadLocalOAuthAccounts reads all codex-auth accounts from the registry", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "ccr-switch-"));
+  const codexDir = await mkdtemp(path.join(os.tmpdir(), "ccr-codex-auth-"));
+  const accountsDir = path.join(codexDir, "accounts");
+  const firstAccessToken = createJwt({
+    exp: Math.floor(Date.parse("2026-03-30T06:56:06.000Z") / 1000),
+    email: "first@example.com",
+  });
+  const secondAccessToken = createJwt({
+    exp: Math.floor(Date.parse("2026-03-31T06:56:06.000Z") / 1000),
+    email: "second@example.com",
+  });
+
+  await mkdir(rootDir, { recursive: true });
+  await mkdir(accountsDir, { recursive: true });
+  await writeFile(
+    path.join(accountsDir, "registry.json"),
+    JSON.stringify({
+      active_account_key: "user-first::acct-first",
+      accounts: [
+        {
+          account_key: "user-first::acct-first",
+          email: "first@example.com",
+        },
+        {
+          account_key: "user-second::acct-second",
+          email: "second@example.com",
+        },
+      ],
+    }),
+  );
+  await writeFile(
+    path.join(accountsDir, "dXNlci1maXJzdDo6YWNjdC1maXJzdA.auth.json"),
+    JSON.stringify({
+      tokens: {
+        access_token: firstAccessToken,
+        refresh_token: "first-refresh-token",
+        account_id: "acct-first",
+      },
+      last_refresh: "2026-03-21T01:02:03.000Z",
+    }),
+  );
+  await writeFile(
+    path.join(accountsDir, "dXNlci1zZWNvbmQ6OmFjY3Qtc2Vjb25k.auth.json"),
+    JSON.stringify({
+      tokens: {
+        access_token: secondAccessToken,
+        refresh_token: "second-refresh-token",
+        account_id: "acct-second",
+      },
+      last_refresh: "2026-03-21T01:02:04.000Z",
+    }),
+  );
+
+  const accounts = await loadLocalOAuthAccounts({
+    rootDir,
+    codexAuthFile: path.join(codexDir, "auth.json"),
+    codexRegistryFile: path.join(accountsDir, "registry.json"),
+  });
+
+  assert.equal(accounts.length, 2);
+  assert.deepEqual(
+    accounts.map((account) => account.email),
+    ["first@example.com", "second@example.com"],
+  );
 });
 
 async function writeEncryptedRecord(
@@ -202,4 +311,10 @@ async function writeEncryptedRecord(
 async function hashAccountId(accountId: string) {
   const { createHash } = await import("node:crypto");
   return createHash("sha256").update(accountId).digest("hex");
+}
+
+function createJwt(payload: Record<string, unknown>) {
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.signature`;
 }

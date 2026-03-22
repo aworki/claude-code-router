@@ -70,6 +70,18 @@ sidebar_position: 3
 }
 ```
 
+如果你希望由 CCR 本地内置的 DeerFlow 风格 sidecar 处理网络搜索，而不是把搜索请求路由到某个模型，可以启用 sidecar 并提供 Tavily Key：
+
+```json
+{
+  "SEARCH_SIDECAR_ENABLED": true,
+  "SEARCH_SIDECAR_PORT": 3460,
+  "TAVILY_API_KEY": "$TAVILY_API_KEY"
+}
+```
+
+当 `SEARCH_SIDECAR_ENABLED` 为 `true` 时，CCR 会把 Anthropic 的 `web_search` 工具替换成 CCR 自己管理的自定义工具，并在第一次使用时懒启动本地 sidecar，然后把 DeerFlow 风格的搜索结果（`title`、`url`、`snippet`）回填到对话中。在这种模式下，这类请求不会使用 `Router.webSearch`。
+
 ### 图像任务
 
 路由图像相关任务：

@@ -1,4 +1,5 @@
 import { validateIdToken } from "./jwks";
+import { assertNoDuplicateEmail } from "./duplicate-email";
 import type {
   ExchangeAuthorizationCodeInput,
   IdTokenValidator,
@@ -150,6 +151,7 @@ export class OpenAIOAuthClient {
       invalid: false,
     };
 
+    await assertNoDuplicateEmail(this.vault, bundle);
     await this.vault.save(bundle);
     return bundle;
   }

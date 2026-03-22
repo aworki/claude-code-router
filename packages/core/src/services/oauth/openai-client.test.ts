@@ -249,3 +249,64 @@ test("exchangeAuthorizationCode surfaces the token endpoint error body", async (
     /invalid_client/,
   );
 });
+
+test("exchangeAuthorizationCode stops when another account already uses the same email", async () => {
+  let saveCalls = 0;
+  const vault: TokenVault = {
+    async save() {
+      saveCalls += 1;
+    },
+    async get() {
+      return null;
+    },
+    async list() {
+      return [
+        {
+          accountId: "codex-account-1",
+          accessToken: "existing-access-token",
+          refreshToken: "existing-refresh-token",
+          email: "Person@Example.com",
+          source: "codex-cli",
+          expiresAt: "2026-03-20T00:00:00.000Z",
+          invalid: false,
+        },
+      ];
+    },
+    async markInvalid() {
+      return false;
+    },
+  };
+
+  const client = new OpenAIOAuthClient({
+    clientId: "client-123",
+    vault,
+    validateIdToken: async () => ({
+      sub: "oauth-account-2",
+      email: "person@example.com",
+    }),
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "new-access-token",
+          refresh_token: "refresh-token",
+          id_token: "id-token",
+          expires_in: 3600,
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+  });
+
+  await assert.rejects(
+    client.exchangeAuthorizationCode({
+      code: "auth-code",
+      codeVerifier: "pkce-verifier",
+      redirectUri: "http://localhost:3456/oauth/callback",
+    }),
+    /email.*person@example\.com.*codex-cli/i,
+  );
+
+  assert.equal(saveCalls, 0);
+});

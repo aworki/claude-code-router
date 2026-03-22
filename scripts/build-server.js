@@ -30,6 +30,12 @@ try {
     cwd: serverDir
   });
 
+  console.log('Building search sidecar...');
+  execSync('esbuild src/search-sidecar.ts --bundle --platform=node --minify --tree-shaking=true --outfile=dist/search-sidecar.js', {
+    stdio: 'inherit',
+    cwd: serverDir
+  });
+
   // Copy the tiktoken WASM file
   console.log('Copying tiktoken WASM file...');
   const tiktokenSource = path.join(__dirname, '../packages/server/node_modules/tiktoken/tiktoken_bg.wasm');

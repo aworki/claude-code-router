@@ -83,7 +83,9 @@ export interface SwitchChoice {
 }
 
 const DEFAULT_OAUTH_DIR = path.join(homedir(), ".claude-code-router", "oauth");
+const DEFAULT_CODEX_HOME = path.join(homedir(), ".codex");
 const DEFAULT_CODEX_AUTH_FILE = path.join(homedir(), ".codex", "auth.json");
+const DEFAULT_CODEX_REGISTRY_FILE = path.join(DEFAULT_CODEX_HOME, "accounts", "registry.json");
 
 export function buildSwitchChoices(config: Config, accounts: LocalOAuthAccount[]): SwitchChoice[] {
   const providers = getProviders(config);
@@ -191,18 +193,22 @@ export function applySwitchSelection(config: Config, selection: SwitchSelection)
 }
 
 export async function loadLocalOAuthAccounts(
-  options: { rootDir?: string; codexAuthFile?: string } = {},
+  options: { rootDir?: string; codexAuthFile?: string; codexRegistryFile?: string } = {},
 ): Promise<LocalOAuthAccount[]> {
   const rootDir = options.rootDir ?? DEFAULT_OAUTH_DIR;
   const codexAuthFile = options.codexAuthFile ?? DEFAULT_CODEX_AUTH_FILE;
+  const codexRegistryFile = options.codexRegistryFile ?? DEFAULT_CODEX_REGISTRY_FILE;
   const accounts = new Map<string, LocalOAuthAccount>();
 
   for (const account of await loadVaultAccounts(rootDir)) {
     accounts.set(account.accountId, account);
   }
 
-  const codexAccount = await loadCodexAuthAccount(codexAuthFile);
-  if (codexAccount) {
+  const codexAccounts = await loadCodexAuthAccounts({
+    codexAuthFile,
+    codexRegistryFile,
+  });
+  for (const codexAccount of codexAccounts) {
     accounts.set(codexAccount.accountId, codexAccount);
   }
 
@@ -343,31 +349,95 @@ async function decryptRecord(record: EncryptedVaultRecord, passphrase: string): 
 async function loadCodexAuthAccount(codexAuthFile: string): Promise<LocalOAuthAccount | null> {
   try {
     const raw = await readFile(codexAuthFile, "utf8");
-    const parsed = JSON.parse(raw);
-    const tokens = parsed?.tokens;
-    const accessToken = tokens?.access_token;
-    const refreshToken = tokens?.refresh_token;
-    const accountId = tokens?.account_id;
-
-    if (!accessToken || !refreshToken || !accountId) {
-      return null;
-    }
-
-    return toLocalOAuthAccount({
-      accountId,
-      accessToken,
-      refreshToken,
-      email: decodeJwtEmail(tokens.id_token) ?? decodeJwtEmail(accessToken) ?? undefined,
-      source: "codex-cli",
-      expiresAt:
-        decodeJwtExpiryIso(accessToken) ??
-        parsed?.last_refresh ??
-        new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      invalid: false,
-    });
+    return toLocalOAuthAccountFromAuthPayload(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+async function loadCodexAuthAccounts(options: {
+  codexAuthFile: string;
+  codexRegistryFile: string;
+}): Promise<LocalOAuthAccount[]> {
+  const registryAccounts = await loadCodexAuthAccountsFromRegistry(options.codexRegistryFile);
+  if (registryAccounts.length > 0) {
+    return registryAccounts;
+  }
+
+  const fallbackAccount = await loadCodexAuthAccount(options.codexAuthFile);
+  return fallbackAccount ? [fallbackAccount] : [];
+}
+
+async function loadCodexAuthAccountsFromRegistry(
+  codexRegistryFile: string,
+): Promise<LocalOAuthAccount[]> {
+  try {
+    const raw = await readFile(codexRegistryFile, "utf8");
+    const registry = JSON.parse(raw);
+    const accountKeys = Array.isArray(registry?.accounts)
+      ? registry.accounts
+          .map((account: { account_key?: unknown }) =>
+            typeof account?.account_key === "string" ? account.account_key : null,
+          )
+          .filter((value: string | null): value is string => Boolean(value))
+      : [];
+
+    if (accountKeys.length === 0) {
+      const activeAccountKey =
+        typeof registry?.active_account_key === "string"
+          ? registry.active_account_key
+          : null;
+      if (!activeAccountKey) {
+        return [];
+      }
+      accountKeys.push(activeAccountKey);
+    }
+
+    const authDir = path.dirname(codexRegistryFile);
+    const loaded = await Promise.all(
+      accountKeys.map(async (accountKey) => {
+        try {
+          const authFile = path.join(
+            authDir,
+            `${Buffer.from(accountKey).toString("base64url")}.auth.json`,
+          );
+          const authRaw = await readFile(authFile, "utf8");
+          return toLocalOAuthAccountFromAuthPayload(JSON.parse(authRaw));
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return loaded.filter((account): account is LocalOAuthAccount => account !== null);
+  } catch {
+    return [];
+  }
+}
+
+function toLocalOAuthAccountFromAuthPayload(parsed: Record<string, any>): LocalOAuthAccount | null {
+  const tokens = parsed?.tokens;
+  const accessToken = tokens?.access_token;
+  const refreshToken = tokens?.refresh_token;
+  const accountId = tokens?.account_id;
+
+  if (!accessToken || !refreshToken || !accountId) {
+    return null;
+  }
+
+  return toLocalOAuthAccount({
+    accountId,
+    accessToken,
+    refreshToken,
+    email: decodeJwtEmail(tokens.id_token) ?? decodeJwtEmail(accessToken) ?? undefined,
+    source: "codex-cli",
+    expiresAt:
+      decodeJwtExpiryIso(accessToken) ??
+      (typeof parsed?.last_refresh === "string"
+        ? parsed.last_refresh
+        : new Date(Date.now() + 60 * 60 * 1000).toISOString()),
+    invalid: false,
+  });
 }
 
 function toLocalOAuthAccount(bundle: StoredTokenBundle): LocalOAuthAccount {

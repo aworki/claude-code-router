@@ -25,6 +25,7 @@ import {
 import fastifyMultipart from "@fastify/multipart";
 import AdmZip from "adm-zip";
 import { registerOAuthRoutes } from "./oauth/routes";
+import { searchWithManagedSidecar } from "./search/search-service";
 
 export const createServer = async (config: any): Promise<any> => {
   const server = new Server(config);
@@ -117,6 +118,25 @@ export const createServer = async (config: any): Promise<any> => {
 
     await writeConfigFile(newConfig);
     return { success: true, message: "Config saved successfully" };
+  });
+
+  app.post("/api/search", async (req: any, reply: any) => {
+    try {
+      const query = typeof req.body?.query === "string" ? req.body.query : "";
+      const maxResults =
+        typeof req.body?.maxResults === "number" ? req.body.maxResults : undefined;
+      const results = await searchWithManagedSidecar({
+        query,
+        maxResults,
+      });
+
+      return { results };
+    } catch (error: any) {
+      reply.status(error?.message === "query is required" ? 400 : 500);
+      return {
+        error: error?.message || "search failed",
+      };
+    }
   });
 
   // Register static file serving with caching

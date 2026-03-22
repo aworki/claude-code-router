@@ -31,6 +31,9 @@ interface ResponsesAPIPayload {
     input_tokens: number;
     output_tokens: number;
     total_tokens: number;
+    input_tokens_details?: {
+      cached_tokens?: number;
+    };
   };
 }
 
@@ -64,8 +67,37 @@ interface ResponsesStreamEvent {
     output?: Array<{
       type: string;
     }>;
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+      input_tokens_details?: {
+        cached_tokens?: number;
+      };
+    };
   };
   reasoning_summary?: string; // 添加推理摘要支持
+}
+
+function normalizeResponsesUsageToChatUsage(
+  usage?: ResponsesAPIPayload["usage"] | ResponsesStreamEvent["response"]["usage"],
+) {
+  if (!usage) {
+    return undefined;
+  }
+
+  return {
+    prompt_tokens: usage.input_tokens || 0,
+    completion_tokens: usage.output_tokens || 0,
+    total_tokens: usage.total_tokens || 0,
+    ...(usage.input_tokens_details?.cached_tokens !== undefined
+      ? {
+          prompt_tokens_details: {
+            cached_tokens: usage.input_tokens_details.cached_tokens || 0,
+          },
+        }
+      : {}),
+  };
 }
 
 type ReplayableOpenAIReasoningItem = {
@@ -622,6 +654,13 @@ export class OpenAIResponsesTransformer implements Transformer {
                               finish_reason: finishReason,
                             },
                           ],
+                          ...(normalizeResponsesUsageToChatUsage(data.response?.usage)
+                            ? {
+                                usage: normalizeResponsesUsageToChatUsage(
+                                  data.response?.usage,
+                                ),
+                              }
+                            : {}),
                         };
 
                         controller.enqueue(
@@ -927,13 +966,7 @@ export class OpenAIResponsesTransformer implements Transformer {
           finish_reason: toolCalls ? "tool_calls" : "stop",
         },
       ],
-      usage: responseData.usage
-        ? {
-            prompt_tokens: responseData.usage.input_tokens || 0,
-            completion_tokens: responseData.usage.output_tokens || 0,
-            total_tokens: responseData.usage.total_tokens || 0,
-          }
-        : null,
+      usage: normalizeResponsesUsageToChatUsage(responseData.usage) || null,
     };
 
     return chatResponse;

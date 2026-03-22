@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir, platform as osPlatform } from "node:os";
 import { join } from "node:path";
+import { assertNoDuplicateEmail } from "./duplicate-email";
 import type { StoredTokenBundle, TokenVault } from "./types";
 
 const DEFAULT_CODEX_HOME = join(homedir(), ".codex");
@@ -26,6 +27,7 @@ export async function syncCodexCliCredentialToVault(
     return null;
   }
 
+  await assertNoDuplicateEmail(vault, credential);
   await vault.save(credential);
   return credential;
 }
@@ -34,6 +36,7 @@ export function readCodexCliCredential(
   options: CodexCliSyncOptions = {},
 ): StoredTokenBundle | null {
   return (
+    readCodexAuthCurrentCredential(options) ??
     readCodexCliCredentialFromKeychain(options) ??
     readCodexCliCredentialFromFile(options)
   );
@@ -55,25 +58,50 @@ function readCodexCliCredentialFromFile(options: CodexCliSyncOptions) {
   }
 
   try {
-    const parsed = JSON.parse(readText(authPath, "utf8"));
-    const tokens = parsed?.tokens;
-    if (!tokens?.access_token || !tokens?.refresh_token) {
+    return parseCodexAuthPayload(
+      JSON.parse(readText(authPath, "utf8")),
+      () => readStat(authPath).mtimeMs + 60 * 60 * 1000,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function readCodexAuthCurrentCredential(options: CodexCliSyncOptions) {
+  const codexHome = options.codexHome ?? DEFAULT_CODEX_HOME;
+  const accountsDir = join(codexHome, "accounts");
+  const registryPath = join(accountsDir, "registry.json");
+  const fileExists = options.existsSync ?? existsSync;
+  const readText = options.readFileSync ?? readFileSync;
+  const readStat = options.statSync ?? statSync;
+
+  if (!fileExists(registryPath)) {
+    return null;
+  }
+
+  try {
+    const registry = JSON.parse(readText(registryPath, "utf8"));
+    const activeAccountKey =
+      typeof registry?.active_account_key === "string"
+        ? registry.active_account_key
+        : null;
+
+    if (!activeAccountKey) {
       return null;
     }
 
-    const expiryMs =
-      decodeJwtExpiryMs(tokens.access_token) ??
-      readStat(authPath).mtimeMs + 60 * 60 * 1000;
+    const authPath = join(
+      accountsDir,
+      `${Buffer.from(activeAccountKey).toString("base64url")}.auth.json`,
+    );
+    if (!fileExists(authPath)) {
+      return null;
+    }
 
-    return {
-      accountId: tokens.account_id ?? decodeJwtSubject(tokens.access_token) ?? "codex-cli",
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      email: decodeJwtEmail(tokens.id_token) ?? decodeJwtEmail(tokens.access_token) ?? undefined,
-      expiresAt: new Date(expiryMs).toISOString(),
-      invalid: false,
-      source: "codex-cli",
-    };
+    return parseCodexAuthPayload(
+      JSON.parse(readText(authPath, "utf8")),
+      () => readStat(authPath).mtimeMs + 60 * 60 * 1000,
+    );
   } catch {
     return null;
   }
@@ -105,28 +133,44 @@ function readCodexCliCredentialFromKeychain(options: CodexCliSyncOptions) {
         timeout: 5000,
       },
     ).trim();
-    const parsed = JSON.parse(raw);
-    const tokens = parsed?.tokens;
-    if (!tokens?.access_token || !tokens?.refresh_token) {
-      return null;
-    }
-
-    const expiryMs =
-      decodeJwtExpiryMs(tokens.access_token) ??
-      Date.now() + 60 * 60 * 1000;
-
-    return {
-      accountId: tokens.account_id ?? decodeJwtSubject(tokens.access_token) ?? "codex-cli",
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      email: decodeJwtEmail(tokens.id_token) ?? decodeJwtEmail(tokens.access_token) ?? undefined,
-      expiresAt: new Date(expiryMs).toISOString(),
-      invalid: false,
-      source: "codex-cli",
-    };
+    return parseCodexAuthPayload(JSON.parse(raw), () => Date.now() + 60 * 60 * 1000);
   } catch {
     return null;
   }
+}
+
+function parseCodexAuthPayload(
+  parsed: Record<string, any>,
+  fallbackExpiryMs: () => number,
+): StoredTokenBundle | null {
+  const tokens = parsed?.tokens;
+  if (!tokens?.access_token || !tokens?.refresh_token) {
+    return null;
+  }
+
+  const expiryMs =
+    decodeJwtExpiryMs(tokens.access_token) ??
+    decodeIsoDateMs(parsed?.last_refresh) ??
+    fallbackExpiryMs();
+
+  return {
+    accountId: tokens.account_id ?? decodeJwtSubject(tokens.access_token) ?? "codex-cli",
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    email: decodeJwtEmail(tokens.id_token) ?? decodeJwtEmail(tokens.access_token) ?? undefined,
+    expiresAt: new Date(expiryMs).toISOString(),
+    invalid: false,
+    source: "codex-cli",
+  };
+}
+
+function decodeIsoDateMs(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function decodeJwtExpiryMs(token: string) {

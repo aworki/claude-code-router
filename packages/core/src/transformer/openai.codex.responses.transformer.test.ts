@@ -307,3 +307,33 @@ test("openai-codex-responses transformer treats streamed Codex responses as SSE 
   assert.match(body, /"content":"OK"/);
   assert.match(body, /"finish_reason":"stop"/);
 });
+
+test("openai-codex-responses transformer preserves usage on completed SSE events", async () => {
+  const transformer = new OpenAICodexResponsesTransformer();
+  const response = new Response(
+    [
+      'data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"OK","response":{"model":"gpt-5.4"}}',
+      'data: {"type":"response.done","response":{"id":"resp_1","model":"gpt-5.4","output":[],"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154,"input_tokens_details":{"cached_tokens":20}}}}',
+      "",
+    ].join("\n"),
+    {
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    },
+  );
+
+  const transformed = await transformer.transformResponseOut!(response, {
+    req: {
+      body: {
+        stream: true,
+      },
+    },
+  });
+  const body = await transformed.text();
+
+  assert.match(body, /"prompt_tokens":120/);
+  assert.match(body, /"completion_tokens":34/);
+  assert.match(body, /"total_tokens":154/);
+  assert.match(body, /"cached_tokens":20/);
+});

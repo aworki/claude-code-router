@@ -69,6 +69,18 @@ Route web search tasks:
 }
 ```
 
+If you want CCR to handle web search locally with the built-in DeerFlow-style sidecar instead of routing search requests to a provider model, enable the sidecar and provide a Tavily key:
+
+```json
+{
+  "SEARCH_SIDECAR_ENABLED": true,
+  "SEARCH_SIDECAR_PORT": 3460,
+  "TAVILY_API_KEY": "$TAVILY_API_KEY"
+}
+```
+
+When `SEARCH_SIDECAR_ENABLED` is `true`, CCR replaces Anthropic `web_search` tools with a CCR-managed custom tool, lazily starts a local sidecar on first use, and returns DeerFlow-style search results (`title`, `url`, `snippet`) back into the conversation. In this mode, `Router.webSearch` is not used for those requests.
+
 ### Image Tasks
 
 Route image-related tasks:

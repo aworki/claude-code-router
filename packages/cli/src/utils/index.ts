@@ -9,15 +9,14 @@ import {
   HOME_DIR, PID_FILE,
   PLUGINS_DIR,
   PRESETS_DIR,
-  REFERENCE_COUNT_FILE,
-  readPresetFile,
 } from "@CCR/shared";
 import { getServer } from "@CCR/server";
-import { writeFileSync, existsSync, readFileSync, mkdirSync } from "fs";
+import { writeFileSync } from "fs";
 import { checkForUpdates, performUpdate } from "./update";
 import { version } from "../../package.json";
 import { spawn } from "child_process";
-import { cleanupPidFile, getServiceInfo } from "./processCheck";
+import { getServiceInfo } from "./processCheck";
+import { restartServiceWith } from "./restart";
 
 // Function to interpolate environment variables in config values
 const interpolateEnvVars = (obj: any): any => {
@@ -217,41 +216,7 @@ export const run = async (args: string[] = []) => {
   await server.start();
 }
 
-export const restartService = async () => {
-  // Stop the service if it's running
-  try {
-    const pid = parseInt(readFileSync(PID_FILE, "utf-8"));
-    process.kill(pid);
-    cleanupPidFile();
-    if (existsSync(REFERENCE_COUNT_FILE)) {
-      try {
-        await fs.unlink(REFERENCE_COUNT_FILE);
-      } catch (e) {
-        // Ignore cleanup errors
-      }
-    }
-    console.log("claude code router service has been stopped.");
-  } catch (e) {
-    console.log("Service was not running or failed to stop.");
-    cleanupPidFile();
-  }
-
-  // Start the service again in the background
-  console.log("Starting claude code router service...");
-  const cliPath = path.join(__dirname, "cli.js");
-  const startProcess = spawn("node", [cliPath, "start"], {
-    detached: true,
-    stdio: "ignore",
-  });
-
-  startProcess.on("error", (error) => {
-    console.error("Failed to start service:", error);
-    throw error;
-  });
-
-  startProcess.unref();
-  console.log("✅ Service started successfully in the background.");
-};
+export const restartService = async () => restartServiceWith();
 
 
 /**

@@ -63,6 +63,17 @@ try {
     console.warn('⚠ Warning: tiktoken_bg.wasm not found in server dist, skipping...');
   }
 
+  console.log('Copying search-sidecar.js from server to CLI dist...');
+  const sidecarSource = path.join(serverDir, 'dist/search-sidecar.js');
+  const sidecarDest = path.join(cliDistDir, 'search-sidecar.js');
+
+  if (fs.existsSync(sidecarSource)) {
+    fs.copyFileSync(sidecarSource, sidecarDest);
+    console.log('✓ search-sidecar.js copied successfully!');
+  } else {
+    console.warn('⚠ Warning: search-sidecar.js not found in server dist, skipping...');
+  }
+
   // Step 6: Copy UI index.html from UI dist to CLI dist
   console.log('Copying index.html from UI to CLI dist...');
   const uiSource = path.join(uiDir, 'dist/index.html');
