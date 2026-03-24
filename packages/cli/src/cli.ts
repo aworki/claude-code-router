@@ -3,18 +3,6 @@ import { run, restartService } from "./utils";
 import { showStatus } from "./utils/status";
 import { executeCodeCommand, PresetConfig } from "./utils/codeCommand";
 import {
-  bindOAuthProviderAccount,
-  captureOAuthLoginSession,
-  fetchOAuthStatus,
-  getOAuthCallbackListenerMessage,
-  formatOAuthAccounts,
-  getOAuthRedirectUriFromAuthorizationUrl,
-  getOAuthLoginGuidance,
-  openExternalUrl,
-  postOAuthComplete,
-  waitForOAuthCallback,
-} from "./utils/oauth";
-import {
   cleanupPidFile,
   getServiceInfo,
 } from "./utils/processCheck";
@@ -44,7 +32,6 @@ const KNOWN_COMMANDS = [
   "code",
   "model",
   "switch",
-  "oauth",
   "preset",
   "install",
   "activate",
@@ -67,8 +54,7 @@ Commands:
   statusline    Integrated statusline
   code          Execute claude command
   model         Interactive model selection and configuration
-  switch        Switch the active provider or OAuth account
-  oauth         Manage OpenAI OAuth login and status
+  switch        Switch the active provider or Codex-auth account
   preset        Manage presets (export, install, list, delete)
   install       Install preset from GitHub marketplace
   activate      Output environment variables for shell integration
@@ -138,102 +124,6 @@ async function startServiceIfNeeded() {
       "Service startup timeout, please manually run `ccr start` to start the service"
     );
     process.exit(1);
-  }
-}
-
-async function handleOAuthCommand(args: string[]) {
-  const subcommand = args[0];
-
-  switch (subcommand) {
-    case "login": {
-      await startServiceIfNeeded();
-      const serviceInfo = await getServiceInfo();
-      const authorizationUrl = await captureOAuthLoginSession(serviceInfo.endpoint);
-      const redirectUri = getOAuthRedirectUriFromAuthorizationUrl(authorizationUrl);
-
-      if (!redirectUri) {
-        await openExternalUrl(authorizationUrl);
-        console.log(getOAuthLoginGuidance());
-        break;
-      }
-
-      let callbackPromise: Promise<string> | null = null;
-      try {
-        callbackPromise = waitForOAuthCallback(redirectUri);
-        console.log(getOAuthCallbackListenerMessage(redirectUri));
-      } catch (error) {
-        callbackPromise = null;
-        console.warn(`Automatic OAuth callback capture is unavailable: ${(error as Error).message}`);
-      }
-
-      await openExternalUrl(authorizationUrl);
-
-      if (!callbackPromise) {
-        console.log(getOAuthLoginGuidance());
-        break;
-      }
-
-      try {
-        const callbackUrl = await callbackPromise;
-        const result = await postOAuthComplete(serviceInfo.endpoint, callbackUrl);
-        if (typeof result?.accountId === "string" && result.accountId) {
-          const config = await readConfigFile();
-          await writeConfigFile(bindOAuthProviderAccount(config, result.accountId));
-        }
-        console.log("OAuth completed successfully.");
-      } catch (error) {
-        console.warn(`Automatic OAuth completion failed: ${(error as Error).message}`);
-        console.log(getOAuthLoginGuidance());
-      }
-      break;
-    }
-    case "complete": {
-      await startServiceIfNeeded();
-      const callbackUrl = args[1];
-      if (!callbackUrl) {
-        console.error("Usage: ccr oauth complete <callback-url>");
-        process.exit(1);
-      }
-
-      const serviceInfo = await getServiceInfo();
-      const result = await postOAuthComplete(serviceInfo.endpoint, callbackUrl);
-      if (typeof result?.accountId === "string" && result.accountId) {
-        const config = await readConfigFile();
-        await writeConfigFile(bindOAuthProviderAccount(config, result.accountId));
-      }
-      console.log(
-        typeof result?.success === "boolean" && result.success
-          ? "OAuth completion submitted successfully."
-          : JSON.stringify(result, null, 2)
-      );
-      break;
-    }
-    case "status": {
-      const serviceInfo = await getServiceInfo();
-      if (!serviceInfo.running) {
-        console.log("Service not running. Start it with `ccr start` first.");
-        process.exit(1);
-      }
-
-      const oauthStatus = await fetchOAuthStatus(serviceInfo.endpoint);
-      const output = formatOAuthAccounts(oauthStatus.accounts);
-      if (output) {
-        console.log(output);
-      } else {
-        console.log("No OAuth accounts configured.");
-      }
-      break;
-    }
-    default:
-      console.log(
-        [
-          "Usage: ccr oauth <login|complete|status>",
-          "  login    Open the OpenAI OAuth login flow in your browser",
-          "  complete Submit a callback URL to finish OAuth authorization",
-          "  status   Show OAuth account status for the local CCR server",
-        ].join("\n")
-      );
-      process.exit(1);
   }
 }
 
@@ -424,9 +314,6 @@ async function main() {
       }
       break;
     }
-    case "oauth":
-      await handleOAuthCommand(process.argv.slice(3));
-      break;
     case "preset":
       await handlePresetCommand(process.argv.slice(3));
       break;

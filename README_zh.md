@@ -15,7 +15,7 @@
 
 > 一款强大的工具，可将 Claude Code 请求路由到不同的模型，并自定义任何请求。
 
-> 当前这个 worktree 还带有一层面向 Codex 的 fork 扩展。除上游的基础路由能力外，它还支持导入 Codex CLI OAuth 凭据、完成本地 OpenAI OAuth 流程，并通过 Codex backend transport 转发 GPT-5.4 请求。
+> 当前这个 worktree 还带有一层面向 Codex 的 fork 扩展。除上游的基础路由能力外，它还支持直接读取本机 Codex 凭据，并通过 Codex backend transport 转发 GPT-5.4 请求。
 
 ![](blog/images/claude-code.png)
 
@@ -26,7 +26,7 @@
 -   **多提供商支持**: 支持 OpenRouter、DeepSeek、Ollama、Gemini、Volcengine 和 SiliconFlow 等各种模型提供商。
 -   **请求/响应转换**: 使用转换器为不同的提供商自定义请求和响应。
 -   **动态模型切换**: 在 Claude Code 中使用 `/model` 命令动态切换模型。
--   **Codex OAuth + GPT-5.4 支持**: 可以授权一个或多个 OpenAI 账户、导入 Codex CLI 凭据，并在不保存原始 OpenAI API Key 的前提下路由 `gpt-5.4` 请求。
+-   **Codex Auth + GPT-5.4 支持**: 可以直接读取本机 Codex 凭据，并在不保存原始 OpenAI API Key 的前提下路由 `gpt-5.4` 请求。
 -   **GitHub Actions 集成**: 在您的 GitHub 工作流程中触发 Claude Code 任务。
 -   **插件系统**: 使用自定义转换器扩展功能。
 
@@ -64,33 +64,27 @@ npm install -g @musistudio/claude-code-router
 - **`Router`**: 用于设置路由规则。`default` 指定默认模型，如果未配置其他路由，则该模型将用于所有请求。
 - **`API_TIMEOUT_MS`**: API 请求超时时间，单位为毫秒。
 
-#### OpenAI OAuth Provider
+#### Codex Auth Provider
 
-当前这个 fork 也支持 `openai-oauth` provider，用于 Codex / GPT-5.4 路由。最小配置示例如下：
+当前这个 fork 内置了 `codex-auth` provider，用于 Codex / GPT-5.4 路由。最小配置示例如下：
 
 ```json
 {
-  "name": "openai-oauth",
-  "auth_strategy": "openai-oauth",
+  "name": "codex-auth",
+  "auth_strategy": "codex-auth",
   "account_id": "",
   "api_base_url": "https://chatgpt.com/backend-api/codex/responses",
   "api_key": "",
-  "models": ["gpt-5.4"],
-  "oauth": {
-    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-    "redirect_uri": "http://localhost:1455/auth/callback",
-    "scopes": ["openid", "email", "profile", "offline_access"]
-  }
+  "models": ["gpt-5.4"]
 }
 ```
 
 说明：
 
-- `account_id` 用于选择 provider 绑定的 OpenAI 账户；留空时，如果本地只有一个有效 OAuth 账户，CCR 会自动选中它。
-- `openai-oauth` provider 的 `api_key` 应保持为空，OAuth token 会由 CCR 本地 token vault 管理。
-- `redirect_uri` 需要与本地 CCR 服务回调地址一致，当前默认值是 `http://localhost:1455/auth/callback`。
+- `account_id` 用于选择 provider 绑定的 Codex 账户；留空时，CCR 会自动跟随当前导入的 Codex 账户。
+- `codex-auth` provider 的 `api_key` 应保持为空，认证信息直接读取自本机 Codex。
 - `api_base_url` 会被规范化到 Codex backend transport，这个 provider 不走 public OpenAI `chat/completions`。
-- 在 macOS 下，CCR 还可以从 Codex CLI（`~/.codex/auth.json` 或 `Codex Auth` 钥匙串记录）导入凭据。
+- 账户来源是 `~/.codex/accounts/registry.json` 及对应的 `*.auth.json`，缺失时回退到 `~/.codex/auth.json`。
 
 这是一个综合示例：
 
@@ -225,22 +219,20 @@ ccr code
 > ccr restart
 > ```
 
-### OpenAI OAuth 授权流程
+### Codex 认证流程
 
-如果要通过 OpenAI OAuth provider 路由，请先完成账户授权：
+如果要通过 `codex-auth` provider 路由，请先在本机 Codex 完成登录：
 
 ```shell
-ccr oauth login
-ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
-ccr oauth status
+ccr start
+ccr switch
 ```
 
-- `ccr oauth login` 会启动浏览器授权流程。
-- `ccr oauth complete` 是 CLI 的手动回调收尾命令，适合粘贴浏览器地址栏中的 callback URL。
-- `ccr oauth status` 会输出脱敏后的账户信息、过期时间和是否需要重新授权。
-- `ccr oauth complete` 完成后，CCR 还会把解析出来的 `account_id` 自动写回 `openai-oauth` provider。
+- `CCR` 启动时会自动读取当前 Codex 账户。
+- `ccr switch` 只展示可用的 Codex 账户，并把选中的账户写回 `account_id`。
+- 旧的 `ccr oauth` 命令和本地回调流程已经删除。
 
-Web UI 也新增了 OpenAI OAuth 登录入口，以及 `auth_strategy`、`account_id`、`oauth.redirect_uri` 等 provider 配置项。
+Web UI 里也统一成 `codex-auth` provider，只保留 `auth_strategy`、`account_id` 等必要配置项。
 
 如果你要排查最终上游请求，CCR 会把结构化的 `final request` 日志写到 `~/.claude-code-router/logs/ccr-*.log`，其中包含真正发往 `https://chatgpt.com/backend-api/codex/responses` 的 request body。
 

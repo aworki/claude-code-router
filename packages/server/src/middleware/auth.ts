@@ -9,11 +9,6 @@ export const apiKeyAuth =
     const publicPaths = [
       "/",
       "/health",
-      "/oauth/login",
-      "/oauth/callback",
-      "/auth/callback",
-      "/oauth/complete",
-      "/api/oauth/status",
     ];
     if (publicPaths.includes(pathname) || pathname.startsWith("/ui")) {
       return done();

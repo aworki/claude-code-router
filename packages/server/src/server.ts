@@ -24,7 +24,6 @@ import {
 } from "@CCR/shared";
 import fastifyMultipart from "@fastify/multipart";
 import AdmZip from "adm-zip";
-import { registerOAuthRoutes } from "./oauth/routes";
 import { searchWithManagedSidecar } from "./search/search-service";
 
 export const createServer = async (config: any): Promise<any> => {
@@ -35,11 +34,6 @@ export const createServer = async (config: any): Promise<any> => {
     limits: {
       fileSize: 50 * 1024 * 1024, // 50MB
     },
-  });
-
-  await app.register(registerOAuthRoutes, {
-    config: () => (server as any).configService?.getAll?.() ?? config.initialConfig ?? config,
-    oauthService: (server as any).oauthService,
   });
 
   app.post("/v1/messages/count_tokens", async (req: any, reply: any) => {

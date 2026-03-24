@@ -25,10 +25,7 @@ import Fastify, {
   FastifyServerOptions,
 } from "fastify";
 import cors from "@fastify/cors";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { ConfigService, AppConfig } from "./services/config";
 import { errorHandler } from "./api/middleware";
 import { registerApiRoutes } from "./api/routes";
@@ -39,10 +36,10 @@ import { router, calculateTokenCount, searchProjectBySession } from "./utils/rou
 import { sessionUsageCache } from "./utils/cache";
 import { OAuthService } from "./services/oauth/service";
 import {
-  getAutoBootstrappedOpenAIOAuthConfig,
+  getAutoBootstrappedCodexAuthConfig,
   normalizeOAuthProviderConfig,
 } from "./services/oauth/config";
-import { createTokenVault } from "./services/oauth/token-vault";
+import { getActiveCodexAuthAccount } from "./services/oauth/codex-auth-source";
 import { normalizeMessagesRequestBody } from "./utils/request-normalization";
 
 // Extend FastifyRequest to include custom properties
@@ -87,11 +84,7 @@ class Server {
   oauthService: OAuthService;
 
   constructor(options: ServerOptions = {}) {
-    const installationSecret = getOrCreateInstallationSecret();
-    const normalizedInitialConfig = normalizeServerInitialConfig(
-      options.initialConfig,
-      installationSecret,
-    );
+    const normalizedInitialConfig = normalizeServerInitialConfig(options.initialConfig);
     const fastifyOptions = {
       ...options,
       initialConfig: normalizedInitialConfig,
@@ -104,11 +97,7 @@ class Server {
       ...options,
       initialConfig: normalizedInitialConfig,
     });
-    const oauthVault = createTokenVault({
-      passphrase: this.configService.get("OAUTH_PASSPHRASE", installationSecret),
-    });
     this.oauthService = new OAuthService({
-      vault: oauthVault,
       logger: this.app.log,
     });
     this.transformerService = new TransformerService(
@@ -230,15 +219,12 @@ class Server {
 
   async start(): Promise<void> {
     try {
-      const importedCredential = await this.oauthService.syncExternalCredentials().catch((error) => {
-        this.app.log.warn({ error }, "Failed to sync Codex CLI credential");
-        return null;
-      });
+      const hasImportedCredential = Boolean(await getActiveCodexAuthAccount());
 
-      const bootstrapConfig = getAutoBootstrappedOpenAIOAuthConfig(
+      const bootstrapConfig = getAutoBootstrappedCodexAuthConfig(
         this.configService.getAll(),
         {
-          hasImportedCredential: Boolean(importedCredential),
+          hasImportedCredential,
         },
       );
       if (bootstrapConfig) {
@@ -253,11 +239,11 @@ class Server {
         this.app.log.info(
           {
             model: bootstrapConfig.Router.default,
-            importedCredential: Boolean(importedCredential),
+            importedCredential: hasImportedCredential,
           },
-          importedCredential
-            ? "Bootstrapped default openai-oauth config from imported Codex CLI credentials"
-            : "Bootstrapped default openai-oauth config for first-run onboarding",
+          hasImportedCredential
+            ? "Bootstrapped default codex-auth config from imported Codex CLI credentials"
+            : "Bootstrapped default codex-auth config for first-run onboarding",
         );
       }
 
@@ -323,33 +309,9 @@ class Server {
   }
 }
 
-const INSTALLATION_SECRET_PATH = join(
-  homedir(),
-  ".claude-code-router",
-  "oauth",
-  "installation-secret",
-);
-
-function getOrCreateInstallationSecret() {
-  if (existsSync(INSTALLATION_SECRET_PATH)) {
-    const secret = readFileSync(INSTALLATION_SECRET_PATH, "utf8").trim();
-    if (secret) {
-      return secret;
-    }
-  }
-
-  mkdirSync(dirname(INSTALLATION_SECRET_PATH), { recursive: true });
-  const secret = randomBytes(32).toString("hex");
-  writeFileSync(INSTALLATION_SECRET_PATH, `${secret}\n`, { mode: 0o600 });
-  return secret;
-}
-
-function normalizeServerInitialConfig(initialConfig: AppConfig | undefined, installationSecret: string) {
+function normalizeServerInitialConfig(initialConfig: AppConfig | undefined) {
   if (!initialConfig) {
-    return {
-      OAUTH_PASSPHRASE: installationSecret,
-      OAUTH_COOKIE_SECRET: installationSecret,
-    };
+    return undefined;
   }
 
   const normalizeProviderList = (providers: any[] | undefined) =>
@@ -359,14 +321,6 @@ function normalizeServerInitialConfig(initialConfig: AppConfig | undefined, inst
     ...initialConfig,
     providers: normalizeProviderList(initialConfig.providers) ?? initialConfig.providers,
     Providers: normalizeProviderList(initialConfig.Providers) ?? initialConfig.Providers,
-    OAUTH_PASSPHRASE:
-      initialConfig.OAUTH_PASSPHRASE ??
-      process.env.OAUTH_PASSPHRASE ??
-      installationSecret,
-    OAUTH_COOKIE_SECRET:
-      initialConfig.OAUTH_COOKIE_SECRET ??
-      process.env.OAUTH_COOKIE_SECRET ??
-      installationSecret,
   };
 }
 

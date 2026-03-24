@@ -46,33 +46,15 @@ Output shell environment variables for integration with external tools.
 ccr activate
 ```
 
-## ccr oauth
+## Codex-auth workflow
 
-Manage the local OpenAI OAuth flow used by `openai-oauth` providers.
+Legacy `ccr oauth` commands have been removed in this fork.
 
-### Start browser authorization
+To use the built-in Codex provider:
 
-```bash
-ccr oauth login
-```
-
-This starts the local OAuth flow and opens the authorization page in your browser.
-
-### Finish with a pasted callback URL
-
-```bash
-ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
-```
-
-Use this command when you want to complete the callback exchange manually from the CLI.
-
-### Show OAuth account status
-
-```bash
-ccr oauth status
-```
-
-This prints redacted account metadata, expiry, and whether re-authentication is required.
+1. Sign in with Codex on the same machine.
+2. Start CCR with `ccr start`.
+3. Use `ccr switch` if you need to bind a different local Codex account.
 
 ## Global Options
 
@@ -105,12 +87,10 @@ ccr restart --config /path/to/config.json
 ccr ui
 ```
 
-### Run the OAuth flow
+### Switch the active Codex-auth account
 
 ```bash
-ccr oauth login
-ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
-ccr oauth status
+ccr switch
 ```
 
 ## Related Documentation

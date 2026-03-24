@@ -1,9 +1,6 @@
-import argon2 from "argon2";
 import { select } from "@inquirer/prompts";
-import { createDecipheriv, createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
+import { createHash } from "node:crypto";
+import { listCodexAuthAccounts } from "../../../core/src/services/oauth/codex-auth-source";
 import { readConfigFile, writeConfigFile } from "./index";
 
 interface ProviderConfig {
@@ -26,37 +23,10 @@ interface Config {
   [key: string]: any;
 }
 
-interface EncryptedVaultRecord {
-  version: 1;
-  algorithm: "aes-256-gcm";
-  kdf: "argon2id";
-  salt: string;
-  iv: string;
-  tag: string;
-  ciphertext: string;
-}
-
-interface StoredTokenBundle {
-  accountId: string;
-  accessToken: string;
-  refreshToken: string;
-  idToken?: string;
-  email?: string;
-  source?: "oauth" | "codex-cli";
-  expiresAt: string;
-  invalid?: boolean;
-}
-
-interface StoredTokenRecord {
-  bundle: StoredTokenBundle;
-  savedAt: string;
-  writeOrder?: number;
-}
-
 export interface LocalOAuthAccount {
   accountId: string;
   email?: string;
-  source?: "oauth" | "codex-cli";
+  source?: "codex-cli";
   expiresAt: string;
   invalid: boolean;
   reauthRequired: boolean;
@@ -71,7 +41,7 @@ export type SwitchSelection =
       providerName: string;
     }
   | {
-      kind: "oauth-account";
+      kind: "codex-account";
       providerName: string;
       accountId: string;
     };
@@ -82,25 +52,23 @@ export interface SwitchChoice {
   description?: string;
 }
 
-const DEFAULT_OAUTH_DIR = path.join(homedir(), ".claude-code-router", "oauth");
-const DEFAULT_CODEX_HOME = path.join(homedir(), ".codex");
-const DEFAULT_CODEX_AUTH_FILE = path.join(homedir(), ".codex", "auth.json");
-const DEFAULT_CODEX_REGISTRY_FILE = path.join(DEFAULT_CODEX_HOME, "accounts", "registry.json");
+const DEFAULT_OAUTH_PROVIDER_NAME = "codex-auth";
+const DEFAULT_OAUTH_MODEL = "gpt-5.4";
 
 export function buildSwitchChoices(config: Config, accounts: LocalOAuthAccount[]): SwitchChoice[] {
-  const providers = getProviders(config);
+  const providers = getProviders(withSynthesizedOAuthProvider(config, accounts));
   const current = getCurrentRoute(config);
 
   return providers.flatMap((provider) => {
-    if (provider.auth_strategy === "openai-oauth") {
+    if (provider.auth_strategy === "codex-auth") {
       return accounts.map((account) => {
         const label = account.email || account.emailHint || account.accountId;
         const isCurrent =
           current?.providerName === provider.name && provider.account_id === account.accountId;
 
         return {
-          name: `${provider.name} -> ${label} [${account.source ?? "oauth"}]${isCurrent ? " (current)" : ""}`,
-          value: `oauth-account:${provider.name}:${account.accountId}`,
+          name: `${provider.name} -> ${label} [${account.source ?? "codex-cli"}]${isCurrent ? " (current)" : ""}`,
+          value: `codex-account:${provider.name}:${account.accountId}`,
           description: account.accountId,
         };
       });
@@ -129,7 +97,9 @@ export function resolveSwitchTarget(
     return null;
   }
 
-  for (const provider of getProviders(config)) {
+  const effectiveConfig = withSynthesizedOAuthProvider(config, accounts);
+
+  for (const provider of getProviders(effectiveConfig)) {
     if (provider.name.toLowerCase() === normalizedTarget) {
       return {
         kind: "provider",
@@ -138,7 +108,7 @@ export function resolveSwitchTarget(
     }
   }
 
-  const oauthProvider = getProviders(config).find((provider) => provider.auth_strategy === "openai-oauth");
+  const oauthProvider = getProviders(effectiveConfig).find((provider) => provider.auth_strategy === "codex-auth");
   if (!oauthProvider) {
     return null;
   }
@@ -156,7 +126,7 @@ export function resolveSwitchTarget(
 
     if (candidates.includes(normalizedTarget)) {
       return {
-        kind: "oauth-account",
+        kind: "codex-account",
         providerName: oauthProvider.name,
         accountId: account.accountId,
       };
@@ -168,6 +138,26 @@ export function resolveSwitchTarget(
 
 export function applySwitchSelection(config: Config, selection: SwitchSelection): Config {
   const updated = structuredClone(config);
+  if (
+    selection.kind === "codex-account" &&
+    !getProviders(updated).some((provider) => provider.auth_strategy === "codex-auth")
+  ) {
+    const nextProviders = getProviders(updated);
+    nextProviders.push({
+      name: selection.providerName,
+      auth_strategy: "codex-auth",
+      api_key: "",
+      api_base_url: "https://chatgpt.com/backend-api",
+      account_id: "",
+      models: [DEFAULT_OAUTH_MODEL],
+    });
+
+    if (Array.isArray(updated.Providers)) {
+      updated.Providers = nextProviders;
+    } else {
+      updated.providers = nextProviders;
+    }
+  }
   const providers = getProviders(updated);
 
   if (!updated.Router) {
@@ -184,7 +174,7 @@ export function applySwitchSelection(config: Config, selection: SwitchSelection)
     throw new Error(`Provider ${provider.name} has no configured models`);
   }
 
-  if (selection.kind === "oauth-account") {
+  if (selection.kind === "codex-account") {
     provider.account_id = selection.accountId;
   }
 
@@ -193,26 +183,13 @@ export function applySwitchSelection(config: Config, selection: SwitchSelection)
 }
 
 export async function loadLocalOAuthAccounts(
-  options: { rootDir?: string; codexAuthFile?: string; codexRegistryFile?: string } = {},
+  options: { codexHome?: string } = {},
 ): Promise<LocalOAuthAccount[]> {
-  const rootDir = options.rootDir ?? DEFAULT_OAUTH_DIR;
-  const codexAuthFile = options.codexAuthFile ?? DEFAULT_CODEX_AUTH_FILE;
-  const codexRegistryFile = options.codexRegistryFile ?? DEFAULT_CODEX_REGISTRY_FILE;
-  const accounts = new Map<string, LocalOAuthAccount>();
-
-  for (const account of await loadVaultAccounts(rootDir)) {
-    accounts.set(account.accountId, account);
-  }
-
-  const codexAccounts = await loadCodexAuthAccounts({
-    codexAuthFile,
-    codexRegistryFile,
+  const accounts = await listCodexAuthAccounts({
+    codexHome: options.codexHome,
   });
-  for (const codexAccount of codexAccounts) {
-    accounts.set(codexAccount.accountId, codexAccount);
-  }
 
-  return Array.from(accounts.values()).sort((left, right) => {
+  return accounts.map(toLocalOAuthAccount).sort((left, right) => {
     const leftLabel = `${left.source ?? ""}:${left.email ?? left.accountId}`;
     const rightLabel = `${right.source ?? ""}:${right.email ?? right.accountId}`;
     return leftLabel.localeCompare(rightLabel);
@@ -225,7 +202,7 @@ export async function runSwitchCommand(target?: string) {
   const choices = buildSwitchChoices(config, accounts);
 
   if (!choices.length) {
-    throw new Error("No switchable providers or OAuth accounts found in config.");
+    throw new Error("No switchable providers or Codex accounts found in config.");
   }
 
   const selection =
@@ -260,10 +237,10 @@ function parseSelectionValue(value: string): SwitchSelection {
     };
   }
 
-  if (value.startsWith("oauth-account:")) {
+  if (value.startsWith("codex-account:")) {
     const [, providerName, accountId] = value.split(":");
     return {
-      kind: "oauth-account",
+      kind: "codex-account",
       providerName,
       accountId,
     };
@@ -277,6 +254,40 @@ function getProviders(config: Config): ProviderConfig[] {
   return Array.isArray(providers) ? providers : [];
 }
 
+function withSynthesizedOAuthProvider(config: Config, accounts: LocalOAuthAccount[]): Config {
+  const providers = getProviders(config);
+  const hasOAuthProvider = providers.some((provider) => provider.auth_strategy === "codex-auth");
+  if (hasOAuthProvider || accounts.length === 0) {
+    return config;
+  }
+
+  const route = config.Router?.default;
+  const shouldAddProvider =
+    !route || route.startsWith(`${DEFAULT_OAUTH_PROVIDER_NAME},`);
+  if (!shouldAddProvider) {
+    return config;
+  }
+
+  const nextConfig = structuredClone(config);
+  const nextProviders = getProviders(nextConfig);
+  nextProviders.push({
+    name: DEFAULT_OAUTH_PROVIDER_NAME,
+    auth_strategy: "codex-auth",
+    api_key: "",
+    api_base_url: "https://chatgpt.com/backend-api",
+    account_id: "",
+    models: [DEFAULT_OAUTH_MODEL],
+  });
+
+  if (Array.isArray(nextConfig.Providers)) {
+    nextConfig.Providers = nextProviders;
+  } else {
+    nextConfig.providers = nextProviders;
+  }
+
+  return nextConfig;
+}
+
 function getCurrentRoute(config: Config) {
   const route = config.Router?.default;
   if (!route || typeof route !== "string") {
@@ -287,160 +298,13 @@ function getCurrentRoute(config: Config) {
   return providerName ? { providerName, modelName } : null;
 }
 
-async function loadVaultAccounts(rootDir: string): Promise<LocalOAuthAccount[]> {
-  const passphrase = await readInstallationSecret(rootDir);
-  if (!passphrase) {
-    return [];
-  }
-
-  let names: string[] = [];
-  try {
-    names = await readdir(rootDir);
-  } catch {
-    return [];
-  }
-
-  const records = await Promise.all(
-    names
-      .filter((name) => name.endsWith(".json"))
-      .map(async (name) => {
-        try {
-          const raw = await readFile(path.join(rootDir, name), "utf8");
-          const encrypted = JSON.parse(raw) as EncryptedVaultRecord;
-          const record = await decryptRecord(encrypted, passphrase);
-          return toLocalOAuthAccount(record.bundle);
-        } catch {
-          return null;
-        }
-      }),
-  );
-
-  return records.filter((record): record is LocalOAuthAccount => record !== null);
-}
-
-async function readInstallationSecret(rootDir: string) {
-  try {
-    const value = await readFile(path.join(rootDir, "installation-secret"), "utf8");
-    return value.trim();
-  } catch {
-    return null;
-  }
-}
-
-async function decryptRecord(record: EncryptedVaultRecord, passphrase: string): Promise<StoredTokenRecord> {
-  const salt = Buffer.from(record.salt, "base64");
-  const iv = Buffer.from(record.iv, "base64");
-  const tag = Buffer.from(record.tag, "base64");
-  const ciphertext = Buffer.from(record.ciphertext, "base64");
-  const key = (await argon2.hash(passphrase, {
-    type: argon2.argon2id,
-    salt,
-    hashLength: 32,
-    raw: true,
-  })) as Buffer;
-
-  const decipher = createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-
-  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return JSON.parse(plaintext.toString("utf8")) as StoredTokenRecord;
-}
-
-async function loadCodexAuthAccount(codexAuthFile: string): Promise<LocalOAuthAccount | null> {
-  try {
-    const raw = await readFile(codexAuthFile, "utf8");
-    return toLocalOAuthAccountFromAuthPayload(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-async function loadCodexAuthAccounts(options: {
-  codexAuthFile: string;
-  codexRegistryFile: string;
-}): Promise<LocalOAuthAccount[]> {
-  const registryAccounts = await loadCodexAuthAccountsFromRegistry(options.codexRegistryFile);
-  if (registryAccounts.length > 0) {
-    return registryAccounts;
-  }
-
-  const fallbackAccount = await loadCodexAuthAccount(options.codexAuthFile);
-  return fallbackAccount ? [fallbackAccount] : [];
-}
-
-async function loadCodexAuthAccountsFromRegistry(
-  codexRegistryFile: string,
-): Promise<LocalOAuthAccount[]> {
-  try {
-    const raw = await readFile(codexRegistryFile, "utf8");
-    const registry = JSON.parse(raw);
-    const accountKeys = Array.isArray(registry?.accounts)
-      ? registry.accounts
-          .map((account: { account_key?: unknown }) =>
-            typeof account?.account_key === "string" ? account.account_key : null,
-          )
-          .filter((value: string | null): value is string => Boolean(value))
-      : [];
-
-    if (accountKeys.length === 0) {
-      const activeAccountKey =
-        typeof registry?.active_account_key === "string"
-          ? registry.active_account_key
-          : null;
-      if (!activeAccountKey) {
-        return [];
-      }
-      accountKeys.push(activeAccountKey);
-    }
-
-    const authDir = path.dirname(codexRegistryFile);
-    const loaded = await Promise.all(
-      accountKeys.map(async (accountKey) => {
-        try {
-          const authFile = path.join(
-            authDir,
-            `${Buffer.from(accountKey).toString("base64url")}.auth.json`,
-          );
-          const authRaw = await readFile(authFile, "utf8");
-          return toLocalOAuthAccountFromAuthPayload(JSON.parse(authRaw));
-        } catch {
-          return null;
-        }
-      }),
-    );
-
-    return loaded.filter((account): account is LocalOAuthAccount => account !== null);
-  } catch {
-    return [];
-  }
-}
-
-function toLocalOAuthAccountFromAuthPayload(parsed: Record<string, any>): LocalOAuthAccount | null {
-  const tokens = parsed?.tokens;
-  const accessToken = tokens?.access_token;
-  const refreshToken = tokens?.refresh_token;
-  const accountId = tokens?.account_id;
-
-  if (!accessToken || !refreshToken || !accountId) {
-    return null;
-  }
-
-  return toLocalOAuthAccount({
-    accountId,
-    accessToken,
-    refreshToken,
-    email: decodeJwtEmail(tokens.id_token) ?? decodeJwtEmail(accessToken) ?? undefined,
-    source: "codex-cli",
-    expiresAt:
-      decodeJwtExpiryIso(accessToken) ??
-      (typeof parsed?.last_refresh === "string"
-        ? parsed.last_refresh
-        : new Date(Date.now() + 60 * 60 * 1000).toISOString()),
-    invalid: false,
-  });
-}
-
-function toLocalOAuthAccount(bundle: StoredTokenBundle): LocalOAuthAccount {
+function toLocalOAuthAccount(bundle: {
+  accountId: string;
+  email?: string;
+  source: "codex-cli";
+  expiresAt: string;
+  invalid: boolean;
+}): LocalOAuthAccount {
   return {
     accountId: bundle.accountId,
     email: bundle.email,
@@ -479,31 +343,4 @@ function redactSegment(value: string) {
 function isExpired(expiresAt: string) {
   const expiresAtMs = Date.parse(expiresAt);
   return Number.isFinite(expiresAtMs) ? expiresAtMs <= Date.now() : false;
-}
-
-function decodeJwtEmail(token?: string | null) {
-  const payload = decodeJwtPayload(token);
-  return typeof payload?.email === "string" ? payload.email : null;
-}
-
-function decodeJwtExpiryIso(token?: string | null) {
-  const payload = decodeJwtPayload(token);
-  return typeof payload?.exp === "number" ? new Date(payload.exp * 1000).toISOString() : null;
-}
-
-function decodeJwtPayload(token?: string | null) {
-  if (!token) {
-    return null;
-  }
-
-  const parts = token.split(".");
-  if (parts.length < 2) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }

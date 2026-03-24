@@ -75,6 +75,54 @@ const confirm = async (query: string): Promise<boolean> => {
   return answer.toLowerCase() !== "n";
 };
 
+const normalizeLegacyCodexAuthConfig = (config: any): any => {
+  if (!config || typeof config !== "object") {
+    return config;
+  }
+
+  const normalizeProvider = (provider: any) => {
+    if (!provider || typeof provider !== "object") {
+      return provider;
+    }
+
+    const isLegacyCodexAuth =
+      provider.auth_strategy === "openai-oauth" || provider.name === "openai-oauth";
+    if (!isLegacyCodexAuth) {
+      return provider;
+    }
+
+    const nextProvider = { ...provider };
+    if (nextProvider.name === "openai-oauth") {
+      nextProvider.name = "codex-auth";
+    }
+    if (nextProvider.auth_strategy === "openai-oauth") {
+      nextProvider.auth_strategy = "codex-auth";
+    }
+    if (nextProvider.oauth && typeof nextProvider.oauth === "object") {
+      const { redirect_uri: _redirectUri, ...restOAuth } = nextProvider.oauth;
+      nextProvider.oauth = restOAuth;
+    }
+    return nextProvider;
+  };
+
+  const normalizeRoute = (route: unknown) =>
+    typeof route === "string" ? route.replaceAll("openai-oauth,", "codex-auth,") : route;
+
+  const nextConfig = { ...config };
+  if (Array.isArray(nextConfig.Providers)) {
+    nextConfig.Providers = nextConfig.Providers.map(normalizeProvider);
+  }
+  if (Array.isArray(nextConfig.providers)) {
+    nextConfig.providers = nextConfig.providers.map(normalizeProvider);
+  }
+  if (nextConfig.Router && typeof nextConfig.Router === "object") {
+    nextConfig.Router = Object.fromEntries(
+      Object.entries(nextConfig.Router).map(([key, value]) => [key, normalizeRoute(value)]),
+    );
+  }
+  return nextConfig;
+};
+
 export const readConfigFile = async () => {
   try {
     const config = await fs.readFile(CONFIG_FILE, "utf-8");
@@ -82,7 +130,7 @@ export const readConfigFile = async () => {
       // Try to parse with JSON5 first (which also supports standard JSON)
       const parsedConfig = JSON5.parse(config);
       // Interpolate environment variables in the parsed config
-      return interpolateEnvVars(parsedConfig);
+      return normalizeLegacyCodexAuthConfig(interpolateEnvVars(parsedConfig));
     } catch (parseError) {
       console.error(`Failed to parse config file at ${CONFIG_FILE}`);
       console.error("Error details:", (parseError as Error).message);
@@ -182,8 +230,28 @@ export const initConfig = async () => {
   return config;
 };
 
+interface SyncCodexAuthDeps {
+  getServiceInfo: typeof getServiceInfo;
+  getServer: typeof getServer;
+  log?: (message: string) => void;
+}
+
+export const syncCodexAuthWithRunningService = async (
+  deps: SyncCodexAuthDeps = {
+    getServiceInfo,
+    getServer,
+  },
+) => {
+  const serviceInfo = await deps.getServiceInfo();
+  return serviceInfo;
+};
+
 export const run = async (args: string[] = []) => {
-  const serviceInfo = await getServiceInfo();
+  const serviceInfo = await syncCodexAuthWithRunningService({
+    getServiceInfo,
+    getServer,
+    log: (message) => console.warn(message),
+  });
   if (serviceInfo.running) {
     console.log('claude-code-router server is running');
     return;

@@ -6,7 +6,7 @@ The upstream project is still the base router, but this fork is opinionated arou
 
 - run Claude Code through CCR
 - route default traffic to Codex / GPT-5.4 style backends
-- import and reuse local Codex CLI auth instead of pasting raw OpenAI API keys
+- read and reuse local Codex auth instead of pasting raw OpenAI API keys
 - add a CCR-managed local web search path backed by Tavily
 - make provider/account switching and startup behavior smoother for daily use
 
@@ -14,39 +14,37 @@ The upstream project is still the base router, but this fork is opinionated arou
 
 The following items are extracted from the latest commits on this branch rather than copied from the upstream README.
 
-### 1. Codex OAuth transport support
+### 1. Codex-auth transport support
 
-This fork adds a real `openai-oauth` provider path for Codex-style traffic.
+This fork adds a built-in `codex-auth` provider path for Codex-style traffic, backed by your local Codex auth.
 
 What that means in practice:
 
 - CCR can route requests to `https://chatgpt.com/backend-api/codex/responses`
 - the provider does not require a raw OpenAI API key in config
-- OAuth tokens are stored in CCR's local token vault
+- Codex auth is read from your local Codex installation automatically
 - the router can normalize public OpenAI base URLs to the Codex backend transport automatically
 
 Relevant work landed in the `feat: add codex oauth transport support` commit.
 
-### 2. Import local Codex CLI authentication
+### 2. Read local Codex authentication directly
 
-CCR can import credentials from your local Codex CLI installation and reuse them.
+CCR reads credentials from your local Codex installation directly.
 
-Current import sources in this fork:
+Current auth sources in this fork:
 
-- `~/.codex/accounts/registry.json` + the active account auth file
+- `~/.codex/accounts/registry.json` + per-account auth files
 - fallback `~/.codex/auth.json`
-- macOS keychain entry for `Codex Auth`
 
-This lets CCR bootstrap an `openai-oauth` setup from the auth you already have on the machine.
+CCR does not maintain a separate auth vault for `codex-auth`.
 
 ### 3. Fresh-start bootstrap for first-run setups
 
 This fork improves the "fresh start" experience:
 
-- CCR can bootstrap a minimal `openai-oauth` config on first run
-- the default route can come up as `openai-oauth,gpt-5.4`
-- redirect URI handling for the local OAuth callback is more stable
-- manual OAuth completion flow is clearer and safer
+- CCR can bootstrap a minimal `codex-auth` config on first run
+- the default route can come up as `codex-auth,gpt-5.4`
+- the built-in Codex-auth provider is added automatically when needed
 
 This came from the `fix: fresh start bug` series.
 
@@ -57,10 +55,9 @@ This fork adds a dedicated switch flow for changing the active route without man
 You can switch:
 
 - between normal providers
-- between imported OAuth accounts
-- between Codex CLI imported accounts and regular OAuth accounts
+- between local Codex-auth accounts
 
-The command updates `Router.default`, and for OAuth providers it also binds the selected `account_id`.
+The command updates `Router.default`, and for Codex-auth providers it also binds the selected `account_id`.
 
 ### 5. Local search sidecar backed by Tavily
 
@@ -82,8 +79,8 @@ Recent commits also include smaller but important runtime fixes:
 
 - sub-agent normal call compatibility
 - better mapping from Claude thinking / effort values into router reasoning levels
-- startup and OAuth edge-case fixes
-- duplicate-email protection when importing accounts from different auth sources
+- startup and Codex auth edge-case fixes
+- account cleanup when importing credentials from different auth sources
 
 ## Quick Start
 
@@ -113,8 +110,8 @@ Create `~/.claude-code-router/config.json`:
   "TAVILY_API_KEY": "$TAVILY_API_KEY",
   "Providers": [
     {
-      "name": "openai-oauth",
-      "auth_strategy": "openai-oauth",
+      "name": "codex-auth",
+      "auth_strategy": "codex-auth",
       "account_id": "",
       "api_base_url": "https://chatgpt.com/backend-api/codex/responses",
       "api_key": "",
@@ -122,7 +119,7 @@ Create `~/.claude-code-router/config.json`:
     }
   ],
   "Router": {
-    "default": "openai-oauth,gpt-5.4"
+    "default": "codex-auth,gpt-5.4"
   }
 }
 ```
@@ -141,26 +138,14 @@ ccr code
 
 ## Codex Auth Flow
 
-This fork supports two ways to get an `openai-oauth` provider working.
+This fork now uses local Codex auth as the only supported auth source for the built-in Codex provider.
 
-### Option A: reuse local Codex CLI auth
+Usage is simple:
 
-If your machine already has valid Codex CLI auth, CCR will try to import it on startup.
-
-That is the lowest-friction path for this fork.
-
-### Option B: complete the local OAuth flow through CCR
-
-```bash
-ccr oauth login
-ccr oauth status
-```
-
-If automatic callback capture is unavailable, finish manually:
-
-```bash
-ccr oauth complete "<callback-url>"
-```
+- sign in with Codex on the same machine first
+- start CCR
+- CCR reads the current Codex account automatically
+- `ccr switch` can bind a different local Codex account when needed
 
 ## Search Sidecar
 
@@ -187,9 +172,6 @@ ccr start
 ccr stop
 ccr restart
 ccr status
-ccr oauth login
-ccr oauth complete "<callback-url>"
-ccr oauth status
 ccr switch
 ccr model
 ```

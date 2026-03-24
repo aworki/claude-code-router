@@ -14,8 +14,8 @@ import { TransformerService } from "@/services/transformer";
 import { Transformer } from "@/types/transformer";
 import { OAuthService } from "@/services/oauth/service";
 import {
-  assertOpenAIOAuthProviderLimit,
-  OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+  assertCodexAuthProviderLimit,
+  CODEX_AUTH_SINGLE_PROVIDER_ERROR,
 } from "@/services/oauth/config";
 
 // Extend FastifyInstance to include custom services
@@ -520,13 +520,12 @@ export const registerApiRoutes = async (
             type: { type: "string", enum: ["openai", "anthropic"] },
             baseUrl: { type: "string" },
             apiKey: { type: "string" },
-            auth_strategy: { type: "string", enum: ["api-key", "openai-oauth"] },
+            auth_strategy: { type: "string", enum: ["api-key", "codex-auth"] },
             account_id: { type: "string" },
             oauth: {
               type: "object",
               properties: {
                 client_id: { type: "string" },
-                redirect_uri: { type: "string" },
                 scopes: { type: "array", items: { type: "string" } },
               },
             },
@@ -559,12 +558,12 @@ export const registerApiRoutes = async (
         );
       }
 
-      if (auth_strategy !== "openai-oauth" && !apiKey?.trim()) {
+      if (auth_strategy !== "codex-auth" && !apiKey?.trim()) {
         throw createApiError("API key is required", 400, "invalid_request");
       }
 
       try {
-        assertOpenAIOAuthProviderLimit(
+        assertCodexAuthProviderLimit(
           fastify.providerService.getProviders().map((provider) => ({
             name: provider.name,
             auth_strategy: provider.auth_strategy,
@@ -576,7 +575,7 @@ export const registerApiRoutes = async (
         );
       } catch {
         throw createApiError(
-          OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+          CODEX_AUTH_SINGLE_PROVIDER_ERROR,
           400,
           "invalid_request"
         );
@@ -645,13 +644,12 @@ export const registerApiRoutes = async (
             type: { type: "string", enum: ["openai", "anthropic"] },
             baseUrl: { type: "string" },
             apiKey: { type: "string" },
-            auth_strategy: { type: "string", enum: ["api-key", "openai-oauth"] },
+            auth_strategy: { type: "string", enum: ["api-key", "codex-auth"] },
             account_id: { type: "string" },
             oauth: {
               type: "object",
               properties: {
                 client_id: { type: "string" },
-                redirect_uri: { type: "string" },
                 scopes: { type: "array", items: { type: "string" } },
               },
             },
@@ -681,20 +679,20 @@ export const registerApiRoutes = async (
       };
       const updates = { ...request.body };
 
-      if (effectiveProvider.auth_strategy === "openai-oauth") {
+      if (effectiveProvider.auth_strategy === "codex-auth") {
         effectiveProvider.apiKey = undefined;
         updates.apiKey = undefined;
       }
 
       if (
-        effectiveProvider.auth_strategy !== "openai-oauth" &&
+        effectiveProvider.auth_strategy !== "codex-auth" &&
         !effectiveProvider.apiKey?.trim()
       ) {
         throw createApiError("API key is required", 400, "invalid_request");
       }
 
       try {
-        assertOpenAIOAuthProviderLimit(
+        assertCodexAuthProviderLimit(
           fastify.providerService.getProviders().map((provider) => ({
             name: provider.name,
             auth_strategy: provider.auth_strategy,
@@ -707,7 +705,7 @@ export const registerApiRoutes = async (
         );
       } catch {
         throw createApiError(
-          OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
+          CODEX_AUTH_SINGLE_PROVIDER_ERROR,
           400,
           "invalid_request"
         );

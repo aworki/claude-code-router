@@ -25,50 +25,38 @@ Providers live under the top-level `Providers` array in `~/.claude-code-router/c
 |-------|------|----------|-------------|
 | `name` | string | Yes | Unique provider identifier |
 | `api_base_url` | string | Yes | Full upstream chat/completions URL |
-| `api_key` | string | Usually | Provider API key. Leave empty for `openai-oauth`. |
+| `api_key` | string | Usually | Provider API key. Leave empty for `codex-auth`. |
 | `models` | string[] | Yes | Models exposed through this provider |
-| `auth_strategy` | string | No | `api-key` or `openai-oauth` |
-| `account_id` | string | No | OAuth account binding for `openai-oauth` providers |
-| `oauth.client_id` | string | No | OAuth client ID override |
-| `oauth.redirect_uri` | string | No | Local OAuth callback URI override |
-| `oauth.scopes` | string[] | No | OAuth scope override |
+| `auth_strategy` | string | No | `api-key` or `codex-auth` |
+| `account_id` | string | No | Codex account binding for `codex-auth` providers |
 | `transformer` | object | No | Request/response transformer configuration |
 
-## OpenAI OAuth Example
+## Built-in Codex-auth Example
 
-Use `auth_strategy: "openai-oauth"` when you want CCR to obtain and refresh OpenAI tokens through the local OAuth flow instead of storing a raw OpenAI API key. In this fork, that provider is wired to the Codex backend transport.
+Use `auth_strategy: "codex-auth"` when you want CCR to use your local Codex auth instead of storing a raw OpenAI API key. In this fork, that provider is wired to the Codex backend transport.
 
 ```json
 {
-  "name": "openai-oauth",
-  "auth_strategy": "openai-oauth",
+  "name": "codex-auth",
+  "auth_strategy": "codex-auth",
   "account_id": "",
   "api_base_url": "https://chatgpt.com/backend-api/codex/responses",
   "api_key": "",
-  "models": ["gpt-5.4"],
-  "oauth": {
-    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-    "redirect_uri": "http://localhost:1455/auth/callback",
-    "scopes": ["openid", "email", "profile", "offline_access"]
-  }
+  "models": ["gpt-5.4"]
 }
 ```
 
-Authorize the account before routing traffic to it:
+Before routing traffic to it, sign in with Codex on the same machine. CCR reads from:
 
-```bash
-ccr oauth login
-ccr oauth complete "http://localhost:1455/auth/callback?code=...&state=..."
-ccr oauth status
-```
-
-`ccr oauth status` returns redacted account metadata only. It never prints tokens.
+- `~/.codex/accounts/registry.json` and per-account auth files
+- fallback `~/.codex/auth.json`
 
 Notes:
 
-- Leave `account_id` empty when you want CCR to auto-select the imported Codex/OpenAI account and there is only one valid OAuth bundle.
+- Leave `account_id` empty when you want CCR to auto-select the current local Codex account.
 - `api_base_url` is normalized to the Codex backend route, not the public OpenAI `chat/completions` endpoint.
-- On macOS, CCR can import credentials from Codex CLI (`~/.codex/auth.json` or the `Codex Auth` keychain record).
+- On startup, CCR can auto-add the built-in provider when the config references it or local Codex auth is available.
+- CCR does not keep a separate auth vault for `codex-auth`.
 
 ## API-Key Examples
 
@@ -116,7 +104,7 @@ When selecting a model in routing, use the format:
 For example:
 
 ```
-openai-oauth,gpt-5.4
+codex-auth,gpt-5.4
 ```
 
 ## Next Steps

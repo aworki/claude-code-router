@@ -43,7 +43,7 @@ test("openai-codex-responses transformer builds Codex request payload and URL", 
       },
     } as any,
     {
-      name: "openai-oauth",
+      name: "codex-auth",
       baseUrl: "https://api.openai.com/v1/chat/completions",
     } as any,
     {
@@ -129,7 +129,7 @@ test("openai-codex-responses transformer downgrades non-replayable assistant thi
       ],
     } as any,
     {
-      name: "openai-oauth",
+      name: "codex-auth",
       baseUrl: "https://chatgpt.com/backend-api",
     } as any,
     {},
@@ -171,7 +171,7 @@ test("openai-codex-responses transformer replays provider-native reasoning signa
       ],
     } as any,
     {
-      name: "openai-oauth",
+      name: "codex-auth",
       baseUrl: "https://chatgpt.com/backend-api",
     } as any,
     {},

@@ -123,19 +123,9 @@ export function Login() {
             {error && <div className="text-sm text-red-500">{error}</div>}
           </CardContent>
           <CardFooter>
-            <div className="flex w-full flex-col gap-3">
-              <Button className="w-full" type="submit">
-                {t('login.signIn')}
-              </Button>
-              <Button
-                className="w-full"
-                type="button"
-                variant="outline"
-                onClick={() => api.startOAuthLogin("openai-oauth")}
-              >
-                {t('login.signInWithOpenAI')}
-              </Button>
-            </div>
+            <Button className="w-full" type="submit">
+              {t('login.signIn')}
+            </Button>
           </CardFooter>
         </form>
       </Card>

@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # ccr status
 
-Show the current status of the Claude Code Router server, including OAuth account status when any OpenAI OAuth providers are configured.
+Show the current status of the Claude Code Router server, including local Codex account status when available.
 
 ## Usage
 
@@ -31,7 +31,7 @@ When the server is running:
    ccr code    # Start coding with Claude
    ccr stop    # Stop the service
 
-OAuth Accounts
+Codex Accounts
 ══════════════
 - accountKey: e77b122d95cf
   accountHint: ac...89
@@ -54,18 +54,18 @@ When the server is not running:
    ccr start
 ```
 
-## OAuth Account Output
+## Codex Account Output
 
-When OAuth accounts exist, `ccr status` appends an `OAuth Accounts` section with redacted metadata:
+When local Codex accounts exist, `ccr status` appends a `Codex Accounts` section with redacted metadata:
 
 - `accountKey`: stable non-PII identifier derived from the account ID
 - `accountHint`: redacted account identifier
 - `emailHint`: redacted email hint, when available
 - `expiresAt`: token expiry timestamp
-- `invalid`: whether the stored token bundle has been marked invalid
+- `invalid`: whether the local Codex account metadata is marked invalid
 - `reauthRequired`: whether the account needs re-authentication
 
-This output never includes raw tokens or full email addresses.
+This output is derived from local Codex auth files and never includes raw tokens or full email addresses.
 
 ## Examples
 
@@ -85,4 +85,3 @@ $ ccr status
 - [ccr start](/docs/cli/start) - Start the server
 - [ccr stop](/docs/cli/other-commands#ccr-stop) - Stop the server
 - [ccr restart](/docs/cli/other-commands#ccr-restart) - Restart the server
-- [ccr oauth status](/docs/cli/other-commands#ccr-oauth) - Show OAuth account status only

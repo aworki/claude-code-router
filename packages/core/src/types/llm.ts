@@ -13,11 +13,10 @@ import type { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/messages
 import { Transformer } from "./transformer";
 import type { ProviderTokenizerConfig } from "./tokenizer";
 
-export type ProviderAuthStrategy = "api-key" | "openai-oauth";
+export type ProviderAuthStrategy = "api-key" | "codex-auth";
 
 export interface ProviderOAuthConfig {
   client_id?: string;
-  redirect_uri?: string;
   scopes?: string[];
   authorization_endpoint?: string;
   token_endpoint?: string;

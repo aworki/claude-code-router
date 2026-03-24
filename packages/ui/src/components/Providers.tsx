@@ -138,7 +138,7 @@ export function Providers() {
     if (!editingProviderData) return;
     const authStrategy = editingProviderData.auth_strategy ?? "api-key";
     const persistedProvider =
-      authStrategy === "openai-oauth"
+      authStrategy === "codex-auth"
         ? { ...editingProviderData, api_key: "" }
         : editingProviderData;
     
@@ -164,7 +164,7 @@ export function Providers() {
     }
     
     // Validate API key only for API-key providers
-    if (authStrategy !== "openai-oauth" && (!editingProviderData.api_key || editingProviderData.api_key.trim() === '')) {
+    if (authStrategy !== "codex-auth" && (!editingProviderData.api_key || editingProviderData.api_key.trim() === '')) {
       setApiKeyError(t("providers.api_key_required"));
       return;
     }
@@ -239,7 +239,7 @@ export function Providers() {
     }
   };
 
-  const handleOAuthChange = (field: "client_id" | "redirect_uri" | "scopes", value: string) => {
+  const handleOAuthChange = (field: "client_id" | "scopes", value: string) => {
     if (!editingProviderData) return;
 
     setEditingProviderData({
@@ -643,7 +643,7 @@ export function Providers() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="api-key">{t("providers.auth_strategy_api_key")}</SelectItem>
-                    <SelectItem value="openai-oauth">{t("providers.auth_strategy_openai_oauth")}</SelectItem>
+                    <SelectItem value="codex-auth">{t("providers.auth_strategy_codex_auth")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -680,33 +680,22 @@ export function Providers() {
                 {apiKeyError && (
                   <p className="text-sm text-red-500">{apiKeyError}</p>
                 )}
-                {editingAuthStrategy === "openai-oauth" && (
+                {editingAuthStrategy === "codex-auth" && (
                   <p className="text-sm text-muted-foreground">
                     {t("providers.api_key_not_required")}
                   </p>
                 )}
               </div>
-              {editingAuthStrategy === "openai-oauth" && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="account_id">{t("providers.account_id")}</Label>
-                    <Input
-                      id="account_id"
-                      value={editingProvider.account_id || ""}
-                      onChange={(e) => handleProviderChange(editingProviderIndex, "account_id", e.target.value)}
-                      placeholder={t("providers.account_id_placeholder")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="oauth_redirect_uri">{t("providers.redirect_uri")}</Label>
-                    <Input
-                      id="oauth_redirect_uri"
-                      value={editingProvider.oauth?.redirect_uri || ""}
-                      onChange={(e) => handleOAuthChange("redirect_uri", e.target.value)}
-                      placeholder={t("providers.redirect_uri_placeholder")}
-                    />
-                  </div>
-                </>
+              {editingAuthStrategy === "codex-auth" && (
+                <div className="space-y-2">
+                  <Label htmlFor="account_id">{t("providers.account_id")}</Label>
+                  <Input
+                    id="account_id"
+                    value={editingProvider.account_id || ""}
+                    onChange={(e) => handleProviderChange(editingProviderIndex, "account_id", e.target.value)}
+                    placeholder={t("providers.account_id_placeholder")}
+                  />
+                </div>
               )}
               <div className="space-y-2">
                 <Label htmlFor="models">{t("providers.models")}</Label>

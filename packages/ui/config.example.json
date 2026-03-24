@@ -83,24 +83,14 @@
       }
     },
     {
-      "name": "openai-oauth",
-      "auth_strategy": "openai-oauth",
+      "name": "codex-auth",
+      "auth_strategy": "codex-auth",
       "account_id": "",
       "api_base_url": "https://chatgpt.com/backend-api/codex/responses",
       "api_key": "",
       "models": [
         "gpt-5.4"
-      ],
-      "oauth": {
-        "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-        "redirect_uri": "http://localhost:1455/auth/callback",
-        "scopes": [
-          "openid",
-          "email",
-          "profile",
-          "offline_access"
-        ]
-      }
+      ]
     },
     {
       "name": "deepseek",
@@ -189,7 +179,7 @@
     }
   ],
   "Router": {
-    "default": "openai-oauth,gpt-5.4",
+    "default": "codex-auth,gpt-5.4",
     "background": "gemini-cli,gemini-2.5-flash",
     "think": "gemini-cli,gemini-2.5-pro",
     "longContext": "gemini-cli,gemini-2.5-pro",

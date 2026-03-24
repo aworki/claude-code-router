@@ -9,8 +9,8 @@ import {
 import { ConfigService } from "./config"; 
 import { TransformerService } from "./transformer";
 import {
+  CODEX_AUTH_SINGLE_PROVIDER_ERROR,
   normalizeOAuthProviderConfig,
-  OPENAI_OAUTH_SINGLE_PROVIDER_ERROR,
 } from "./oauth/config";
 
 export class ProviderService {
@@ -39,7 +39,7 @@ export class ProviderService {
           providerConfig
         ) as ConfigProvider;
         const requiresApiKey =
-          normalizedProviderConfig.auth_strategy !== "openai-oauth";
+          normalizedProviderConfig.auth_strategy !== "codex-auth";
 
         if (
           !normalizedProviderConfig.name ||
@@ -49,10 +49,10 @@ export class ProviderService {
           return;
         }
 
-        if (normalizedProviderConfig.auth_strategy === "openai-oauth") {
+        if (normalizedProviderConfig.auth_strategy === "codex-auth") {
           if (oauthProviderRegistered) {
             this.logger.error(
-              `${normalizedProviderConfig.name} provider registered error: ${OPENAI_OAUTH_SINGLE_PROVIDER_ERROR}`,
+              `${normalizedProviderConfig.name} provider registered error: ${CODEX_AUTH_SINGLE_PROVIDER_ERROR}`,
             );
             return;
           }
