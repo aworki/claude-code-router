@@ -80,6 +80,31 @@ test("openai-codex-responses transformer builds Codex request payload and URL", 
   );
 });
 
+test("openai-codex-responses transformer forces upstream streaming for Codex providers", async () => {
+  const transformer = new OpenAICodexResponsesTransformer();
+
+  const transformed = await transformer.transformRequestIn!(
+    {
+      model: "gpt-5.4",
+      stream: false,
+      messages: [
+        {
+          role: "user",
+          content: "Reply with OK",
+        },
+      ],
+    } as any,
+    {
+      name: "codex-auth",
+      baseUrl: "https://chatgpt.com/backend-api/codex/responses",
+    } as any,
+    {},
+  );
+
+  assert.equal(transformed.body.stream, true);
+  assert.equal(transformed.config?.headers?.accept, "text/event-stream");
+});
+
 test("openai-codex-responses transformer normalizes Codex SSE terminal events", async () => {
   const transformer = new OpenAICodexResponsesTransformer();
   const response = new Response(
@@ -336,4 +361,39 @@ test("openai-codex-responses transformer preserves usage on completed SSE events
   assert.match(body, /"completion_tokens":34/);
   assert.match(body, /"total_tokens":154/);
   assert.match(body, /"cached_tokens":20/);
+});
+
+test("openai-codex-responses transformer converts forced upstream streams back to JSON for non-stream callers", async () => {
+  const transformer = new OpenAICodexResponsesTransformer();
+  const response = new Response(
+    [
+      'data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"OK","response":{"model":"gpt-5.4"}}',
+      'data: {"type":"response.done","response":{"id":"resp_1","model":"gpt-5.4","output":[],"usage":{"input_tokens":12,"output_tokens":2,"total_tokens":14}}}',
+      "",
+    ].join("\n"),
+    {
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    },
+  );
+
+  const transformed = await transformer.transformResponseOut!(response, {
+    req: {
+      body: {
+        stream: false,
+      },
+    },
+  });
+
+  assert.match(transformed.headers.get("Content-Type") || "", /application\/json/);
+
+  const body = await transformed.json();
+  assert.equal(body.object, "chat.completion");
+  assert.equal(body.model, "gpt-5.4");
+  assert.equal(body.choices?.[0]?.message?.content, "OK");
+  assert.equal(body.choices?.[0]?.finish_reason, "stop");
+  assert.equal(body.usage?.prompt_tokens, 12);
+  assert.equal(body.usage?.completion_tokens, 2);
+  assert.equal(body.usage?.total_tokens, 14);
 });

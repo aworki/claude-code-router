@@ -132,6 +132,196 @@ function createCodexCompatibleEventStream(body: ReadableStream<Uint8Array>) {
   });
 }
 
+function appendAssistantContent(
+  currentContent: unknown,
+  nextContent: unknown,
+): string | Array<Record<string, any>> | null {
+  if (typeof nextContent === "string") {
+    if (typeof currentContent === "string") {
+      return currentContent + nextContent;
+    }
+    if (Array.isArray(currentContent)) {
+      return [...currentContent, { type: "text", text: nextContent }];
+    }
+    return nextContent;
+  }
+
+  if (Array.isArray(nextContent)) {
+    if (Array.isArray(currentContent)) {
+      return [...currentContent, ...nextContent];
+    }
+    if (typeof currentContent === "string" && currentContent.length > 0) {
+      return [{ type: "text", text: currentContent }, ...nextContent];
+    }
+    return [...nextContent];
+  }
+
+  if (Array.isArray(currentContent)) {
+    return [...currentContent];
+  }
+
+  return typeof currentContent === "string" ? currentContent : null;
+}
+
+async function convertChatStreamToJsonResponse(response: Response) {
+  if (!response.body) {
+    return response;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let responseId = `chatcmpl-${Date.now()}`;
+  let created = Math.floor(Date.now() / 1000);
+  let model = "";
+  let finishReason: string | null = null;
+  let usage: Record<string, any> | null = null;
+  let content: string | Array<Record<string, any>> | null = null;
+  const toolCalls = new Map<number, Record<string, any>>();
+  let thinking: Record<string, any> | null = null;
+  let annotations: Array<Record<string, any>> | undefined;
+
+  const reader = response.body.getReader();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) {
+          continue;
+        }
+
+        const data = line.slice(6).trim();
+        if (!data || data === "[DONE]") {
+          continue;
+        }
+
+        const chunk = JSON.parse(data) as Record<string, any>;
+        responseId = chunk.id || responseId;
+        created = chunk.created || created;
+        model = chunk.model || model;
+        if (chunk.usage) {
+          usage = chunk.usage;
+        }
+
+        const choice = chunk.choices?.[0];
+        if (!choice) {
+          continue;
+        }
+
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+
+        const delta = choice.delta ?? {};
+        content = appendAssistantContent(content, delta.content);
+
+        if (delta.thinking) {
+          thinking = {
+            ...(thinking ?? {}),
+            ...(typeof delta.thinking.content === "string"
+              ? {
+                  content: `${thinking?.content ?? ""}${delta.thinking.content}`,
+                }
+              : {}),
+            ...(typeof delta.thinking.signature === "string"
+              ? {
+                  signature: delta.thinking.signature,
+                }
+              : {}),
+          };
+        }
+
+        if (Array.isArray(delta.annotations) && delta.annotations.length > 0) {
+          annotations = [...(annotations ?? []), ...delta.annotations];
+        }
+
+        if (Array.isArray(delta.tool_calls)) {
+          delta.tool_calls.forEach((toolCall: Record<string, any>) => {
+            const index =
+              typeof toolCall.index === "number" ? toolCall.index : toolCalls.size;
+            const currentToolCall = toolCalls.get(index) ?? {
+              id: toolCall.id,
+              type: toolCall.type ?? "function",
+              function: {
+                name: "",
+                arguments: "",
+              },
+            };
+
+            if (toolCall.id) {
+              currentToolCall.id = toolCall.id;
+            }
+            if (toolCall.type) {
+              currentToolCall.type = toolCall.type;
+            }
+            if (toolCall.function?.name) {
+              currentToolCall.function.name = toolCall.function.name;
+            }
+            if (typeof toolCall.function?.arguments === "string") {
+              currentToolCall.function.arguments += toolCall.function.arguments;
+            }
+
+            toolCalls.set(index, currentToolCall);
+          });
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {}
+  }
+
+  const headers = new Headers(response.headers);
+  headers.set("Content-Type", "application/json");
+  headers.delete("Cache-Control");
+  headers.delete("Connection");
+
+  return new Response(
+    JSON.stringify({
+      id: responseId,
+      object: "chat.completion",
+      created,
+      model,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content,
+            ...(toolCalls.size > 0
+              ? {
+                  tool_calls: Array.from(toolCalls.entries())
+                    .sort(([left], [right]) => left - right)
+                    .map(([, value]) => value),
+                }
+              : {}),
+            ...(thinking ? { thinking } : {}),
+            ...(annotations?.length ? { annotations } : {}),
+          },
+          logprobs: null,
+          finish_reason:
+            finishReason ?? (toolCalls.size > 0 ? "tool_calls" : "stop"),
+        },
+      ],
+      usage,
+    }),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    },
+  );
+}
+
 export class OpenAICodexResponsesTransformer extends OpenAIResponsesTransformer {
   name = "openai-codex-responses";
   endPoint = undefined;
@@ -167,6 +357,7 @@ export class OpenAICodexResponsesTransformer extends OpenAIResponsesTransformer 
     }
 
     body.store = false;
+    body.stream = true;
     body.include = ["reasoning.encrypted_content"];
     body.text = body.text ?? { verbosity: "medium" };
     body.parallel_tool_calls = true;
@@ -191,7 +382,7 @@ export class OpenAICodexResponsesTransformer extends OpenAIResponsesTransformer 
         headers: {
           ...(transformed.config?.headers ?? {}),
           "OpenAI-Beta": "responses=experimental",
-          accept: body.stream === false ? "application/json" : "text/event-stream",
+          accept: "text/event-stream",
           ...(requestId ? { session_id: requestId } : {}),
         },
       },
@@ -200,8 +391,8 @@ export class OpenAICodexResponsesTransformer extends OpenAIResponsesTransformer 
 
   async transformResponseOut(response: Response, context: TransformerContext): Promise<Response> {
     const contentType = response.headers.get("Content-Type") || "";
-    const expectsStream = Boolean(context?.req?.body?.stream);
-    if (response.body && (contentType.includes("text/event-stream") || expectsStream)) {
+    const clientRequestedStream = context?.req?.body?.stream === true;
+    if (response.body && !contentType.includes("application/json")) {
       const headers = new Headers(response.headers);
       headers.set("Content-Type", "text/event-stream");
       response = new Response(createCodexCompatibleEventStream(response.body), {
@@ -211,6 +402,11 @@ export class OpenAICodexResponsesTransformer extends OpenAIResponsesTransformer 
       });
     }
 
-    return super.transformResponseOut(response, context);
+    const transformedResponse = await super.transformResponseOut(response, context);
+    if (clientRequestedStream) {
+      return transformedResponse;
+    }
+
+    return convertChatStreamToJsonResponse(transformedResponse);
   }
 }

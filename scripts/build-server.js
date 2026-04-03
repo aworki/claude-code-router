@@ -36,6 +36,12 @@ try {
     cwd: serverDir
   });
 
+  console.log('Building CCR web search MCP wrapper...');
+  execSync('esbuild src/ccr-web-search-mcp.ts --bundle --platform=node --minify --tree-shaking=true --outfile=dist/ccr-web-search-mcp.js', {
+    stdio: 'inherit',
+    cwd: serverDir
+  });
+
   // Copy the tiktoken WASM file
   console.log('Copying tiktoken WASM file...');
   const tiktokenSource = path.join(__dirname, '../packages/server/node_modules/tiktoken/tiktoken_bg.wasm');
